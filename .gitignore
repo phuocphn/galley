@@ -6,3 +6,6 @@ coverage/
 
 # Agent worktrees, created by the Agent tool
 .claude/worktrees/
+
+# Notes left while trying the tool on the bundled examples
+examples/.feedback/

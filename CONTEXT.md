@@ -1,4 +1,4 @@
-# AI Feedback Editor
+# galley
 
 A local editor for reviewing AI-generated prose and markup. You open a folder of generated files, select a range of text, and attach guidance for the AI agent that will revise it. The guidance is written to disk beside the content so the agent can act on it directly.
 

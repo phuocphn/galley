@@ -56,7 +56,7 @@ export async function mutateNotes(
 const SIDECAR_README = `# Feedback for this folder
 
 This folder holds review feedback on the generated content beside it. It is
-written by [ai-feedback-editor](https://github.com/phuocphn/ai-feedback-editor)
+written by [galley](https://github.com/phuocphn/galley)
 and is meant to be read and acted on by a coding agent.
 
 ## What's here

@@ -1,0 +1,17 @@
+Frequently Asked Questions
+
+Q: Can I migrate my data from another platform?
+A: Absolutely! Meridian supports importing from most major platforms. Our
+migration wizard will guide you through the process step by step, and most
+migrations complete in under an hour.
+
+Q: Is my data secure?
+A: Security is our top priority. All data is encrypted at rest and in transit
+using industry-standard encryption, and we undergo regular third-party audits.
+
+Q: What happens if I cancel?
+A: You can cancel at any time. Your data remains accessible in read-only mode
+for 30 days, after which it is permanently deleted.
+
+Q: Do you offer discounts for nonprofits?
+A: Yes. Reach out to our sales team to learn more about our nonprofit pricing.
