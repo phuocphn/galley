@@ -12,6 +12,7 @@ interface DraftNode {
   kind: 'draft'
   name: string
   path: string
+  openNoteCount: number
 }
 
 type TreeNode = FolderNode | DraftNode
@@ -37,7 +38,12 @@ function buildTree(drafts: DraftSummary[]): TreeNode[] {
       folder = next
     }
 
-    folder.children.push({ kind: 'draft', name: fileName, path: draft.path })
+    folder.children.push({
+      kind: 'draft',
+      name: fileName,
+      path: draft.path,
+      openNoteCount: draft.openNoteCount,
+    })
   }
 
   // Folders before Drafts, alphabetical within each.
@@ -136,6 +142,14 @@ function TreeItem({ node, depth, selectedPath, onSelect }: TreeItemProps) {
       >
         <DraftIcon />
         <span className="truncate">{node.name}</span>
+        {node.openNoteCount > 0 && (
+          <span
+            className="ml-auto shrink-0 rounded-full bg-[var(--review-accent)] px-1.5 text-[11px] font-semibold text-white"
+            title={`${node.openNoteCount} open ${node.openNoteCount === 1 ? 'Note' : 'Notes'}`}
+          >
+            {node.openNoteCount}
+          </span>
+        )}
       </button>
     </li>
   )

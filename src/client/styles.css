@@ -61,3 +61,230 @@ body {
 .cm-editor .cm-cursor {
   display: none;
 }
+
+/* The Note gutter: a + where the pointer is, a mark where a Note already is. */
+.cm-editor .cm-noteGutter {
+  min-width: 22px;
+  padding-left: 6px;
+}
+
+.cm-editor .cm-noteGutter .cm-gutterElement {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cm-addNote {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--review-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cm-hasNote {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #bf8700;
+}
+
+/* Inline threads, sitting beneath the text they are about. */
+.cm-noteBlock {
+  padding: 6px 16px 10px 16px;
+  background: var(--review-muted);
+  border-top: 1px solid var(--review-border);
+  border-bottom: 1px solid var(--review-border);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  white-space: normal;
+}
+
+.cm-noteThread {
+  max-width: 780px;
+  border: 1px solid var(--review-border);
+  border-radius: 6px;
+  background: var(--review-surface);
+  overflow: hidden;
+}
+
+.cm-noteThread--composing {
+  border-color: var(--review-accent);
+}
+
+.cm-noteHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--review-border);
+  background: var(--review-muted);
+  font-size: 12px;
+}
+
+.cm-noteThread--collapsed .cm-noteHeader {
+  border-bottom: none;
+}
+
+.cm-noteHeaderLabel {
+  font-weight: 600;
+}
+
+.cm-noteSummary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--review-dim);
+}
+
+.cm-noteHeader .cm-noteButton {
+  margin-left: auto;
+}
+
+.cm-noteSummary + .cm-noteButton {
+  margin-left: 0;
+}
+
+.cm-noteBody {
+  padding: 10px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.cm-noteBody > *:first-child {
+  margin-top: 0;
+}
+
+.cm-noteBody > *:last-child {
+  margin-bottom: 0;
+}
+
+.cm-noteBody p,
+.cm-noteBody ul,
+.cm-noteBody ol,
+.cm-noteBody pre {
+  margin: 0 0 8px;
+}
+
+.cm-noteBody ul,
+.cm-noteBody ol {
+  padding-left: 20px;
+}
+
+.cm-noteBody ul {
+  list-style: disc;
+}
+
+.cm-noteBody ol {
+  list-style: decimal;
+}
+
+.cm-noteBody code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--review-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.cm-noteBody pre {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--review-muted);
+  overflow-x: auto;
+}
+
+.cm-noteBody pre code {
+  padding: 0;
+  background: none;
+}
+
+.cm-noteEditor {
+  padding: 10px;
+}
+
+.cm-noteTextarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--review-border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.cm-noteTextarea:focus {
+  outline: 2px solid var(--review-accent);
+  outline-offset: -1px;
+}
+
+.cm-noteError {
+  margin: 6px 0 0;
+  color: #d1242f;
+  font-size: 12px;
+}
+
+.cm-noteActions {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  padding-top: 8px;
+}
+
+.cm-noteEditor .cm-noteActions {
+  padding: 8px 0 0;
+}
+
+.cm-noteButton {
+  padding: 4px 10px;
+  border: 1px solid var(--review-border);
+  border-radius: 6px;
+  background: var(--review-surface);
+  color: var(--review-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.cm-noteButton:hover {
+  background: var(--review-muted);
+}
+
+.cm-noteButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.cm-noteButton--primary {
+  border-color: #1f883d;
+  background: #1f883d;
+  color: #fff;
+}
+
+.cm-noteButton--primary:hover {
+  background: #1a7f37;
+}
+
+.cm-noteButton--danger:hover {
+  border-color: #d1242f;
+  background: #d1242f;
+  color: #fff;
+}
+
+.cm-noteButton--quiet {
+  border-color: transparent;
+  background: none;
+  color: var(--review-dim);
+}
