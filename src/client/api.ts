@@ -3,6 +3,7 @@ import type {
   Handoff,
   NewNote,
   Note,
+  NoteChange,
   Reanchor,
   ReplyAuthor,
   ReviewListing,
@@ -45,8 +46,8 @@ export function createNote(note: NewNote): Promise<Note> {
   return send<Note>('/api/notes', asJson('POST', note))
 }
 
-export function updateNote(id: string, body: string): Promise<Note> {
-  return send<Note>(`/api/notes/${id}`, asJson('PATCH', { body }))
+export function updateNote(id: string, change: NoteChange): Promise<Note> {
+  return send<Note>(`/api/notes/${id}`, asJson('PATCH', change))
 }
 
 export function deleteNote(id: string): Promise<void> {

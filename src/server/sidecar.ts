@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { Note, Sidecar } from '../shared/types.js'
+import { withKind } from './kind.js'
 
 export const SIDECAR_DIRECTORY = '.feedback'
 export const NOTES_FILE = 'notes.json'
@@ -12,12 +13,18 @@ export function sidecarPath(reviewRoot: string, file: string): string {
   return path.join(reviewRoot, SIDECAR_DIRECTORY, file)
 }
 
-/** Every Note in the Review. An absent or unreadable sidecar reads as empty. */
+/**
+ * Every Note in the Review. An absent or unreadable sidecar reads as empty.
+ *
+ * A Note with no `kind` — one written before Kinds existed, or added by an
+ * agent editing the file by hand — comes back as a Fix, so nothing downstream
+ * has to keep asking whether the field is there.
+ */
 export async function readNotes(reviewRoot: string): Promise<Note[]> {
   try {
     const raw = await readFile(sidecarPath(reviewRoot, NOTES_FILE), 'utf8')
     const parsed = JSON.parse(raw) as Partial<Sidecar>
-    return Array.isArray(parsed.notes) ? parsed.notes : []
+    return Array.isArray(parsed.notes) ? parsed.notes.map(withKind) : []
   } catch {
     return EMPTY.notes
   }
@@ -70,9 +77,23 @@ Each Note tells you which Draft it is about and exactly which text it is about:
 | \`anchor.before\` / \`anchor.after\` | The text either side of the anchor, for telling repeated passages apart. |
 | \`anchor.startLine\` / \`anchor.endLine\` | Where the anchor was when the Note was written. A hint for you as a human reader — it goes stale as soon as the Draft changes, so do not rely on it. |
 | \`body\` | The reviewer's guidance, in Markdown. |
+| \`kind\` | What the Note asks you to do: \`fix\`, \`question\`, or \`idea\`. See below. |
 | \`status\` | \`open\`, \`answered\`, or \`resolved\`. See below. |
 | \`replies\` | The back-and-forth under the Note, oldest first. |
 | \`createdAt\` / \`updatedAt\` | ISO timestamps. |
+
+## Kinds
+
+A Note's \`kind\` says what it is asking of you. It is not a severity — each
+value asks for something different:
+
+| Kind | What it asks you to do |
+| --- | --- |
+| \`fix\` | Change the anchored text. This is what most Notes are. |
+| \`question\` | The reviewer is asking you something. Answer it in a Reply and leave the Draft alone — a Question is not an instruction to edit. |
+| \`idea\` | A suggestion, not an instruction. Use your judgement, and say in your Reply what you decided and why. |
+
+A Note with no \`kind\` was written before Kinds existed. Read it as \`fix\`.
 
 ## Replying
 
@@ -94,7 +115,8 @@ Then set that Note's \`status\` to \`"answered"\`.
 read the revision and resolve the Note themselves. If they aren't satisfied they
 reply again, which puts the Note back to \`open\`.
 
-A Note that asks you a question wants an answer in a Reply, not an edit.
+A Note whose \`kind\` is \`question\` wants an answer in a Reply, not an edit.
+Reply to it and set it to \`"answered"\` without touching the Draft.
 
 ## Rules for writing this file
 

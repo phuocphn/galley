@@ -1,13 +1,22 @@
 import { EditorView, WidgetType } from '@codemirror/view'
-import type { NoteStatus, Reply, ResolvedNote } from '../../shared/types.js'
+import {
+  NOTE_KINDS,
+  type NoteChange,
+  type NoteKind,
+  type NoteStatus,
+  type Reply,
+  type ResolvedNote,
+} from '../../shared/types.js'
 import { button, element } from './dom.js'
 import { renderMarkdown } from './markdown.js'
 import { closeComposer, setEditing, toggleCollapsed } from './state.js'
 
 /** What a thread or composer can ask the app to do. */
 export interface NoteHandlers {
-  create(range: { from: number; to: number }, body: string): Promise<void>
-  update(id: string, body: string): Promise<void>
+  /** The range the Note attaches to, plus the Kind the composer settled on. */
+  create(range: { from: number; to: number }, note: { body: string; kind: NoteKind }): Promise<void>
+  /** New text, a new Kind, or both. A bare string is the new text. */
+  update(id: string, change: NoteChange): Promise<void>
   remove(id: string): Promise<void>
   reply(id: string, body: string): Promise<void>
   resolve(id: string): Promise<void>
@@ -23,6 +32,69 @@ const STATUS_LABELS: Record<NoteStatus, string> = {
 
 function statusChip(status: NoteStatus): HTMLElement {
   return element('span', `cm-noteStatus cm-noteStatus--${status}`, STATUS_LABELS[status])
+}
+
+const KIND_LABELS: Record<NoteKind, string> = {
+  fix: 'Fix',
+  question: 'Question',
+  idea: 'Idea',
+}
+
+/** What choosing each Kind commits the agent to, in the reviewer's terms. */
+const KIND_HINTS: Record<NoteKind, string> = {
+  fix: 'Change this text.',
+  question: 'Answer me in a Reply — don’t edit.',
+  idea: 'Optional. Use your judgement.',
+}
+
+/** The Kind of a saved Note, at a glance. */
+function kindChip(kind: NoteKind): HTMLElement {
+  const chip = element('span', `cm-noteKind cm-noteKind--${kind}`, KIND_LABELS[kind])
+  chip.title = KIND_HINTS[kind]
+  return chip
+}
+
+/**
+ * The Fix / Question / Idea choice, for a Note being written or edited.
+ *
+ * The chosen Kind lives in this closure rather than in editor state: it is only
+ * a decision until the Note is saved, and the widget is rebuilt from the saved
+ * Note either way.
+ */
+function kindChooser(initial: NoteKind): { node: HTMLElement; chosen: () => NoteKind } {
+  let chosen: NoteKind = initial
+
+  const hint = element('span', 'cm-noteKindHint')
+  const options = element('div', 'cm-noteKindOptions')
+  options.setAttribute('role', 'group')
+  options.setAttribute('aria-label', 'Kind')
+
+  const buttons = new Map<NoteKind, HTMLButtonElement>()
+
+  const choose = (kind: NoteKind): void => {
+    chosen = kind
+    for (const [candidate, node] of buttons) {
+      const picked = candidate === kind
+      node.className = picked
+        ? `cm-noteKindOption cm-noteKindOption--picked cm-noteKind--${candidate}`
+        : 'cm-noteKindOption'
+      node.setAttribute('aria-pressed', String(picked))
+    }
+    hint.textContent = KIND_HINTS[kind]
+  }
+
+  for (const kind of NOTE_KINDS) {
+    const node = button(KIND_LABELS[kind], 'cm-noteKindOption', () => choose(kind))
+    node.title = KIND_HINTS[kind]
+    buttons.set(kind, node)
+    options.append(node)
+  }
+  choose(initial)
+
+  return {
+    node: element('div', 'cm-noteKindChooser', options, hint),
+    chosen: () => chosen,
+  }
 }
 
 /** One Reply under a Note — the agent reporting back, or the reviewer pushing back. */
@@ -58,6 +130,8 @@ function editor(options: {
   onCancel: () => void
   /** A reply box, which sits inside an existing thread and has no Cancel. */
   quiet?: boolean
+  /** Shown above the textarea — the Kind chooser, where there is one. */
+  lead?: HTMLElement
 }): HTMLElement {
   const textarea = element('textarea', 'cm-noteTextarea')
   textarea.value = options.initialValue
@@ -103,6 +177,7 @@ function editor(options: {
   return element(
     'div',
     options.quiet ? 'cm-noteEditor cm-noteEditor--reply' : 'cm-noteEditor',
+    ...(options.lead ? [options.lead] : []),
     textarea,
     error,
     element('div', 'cm-noteActions', ...(cancel ? [confirm, cancel] : [confirm])),
@@ -125,12 +200,18 @@ export class ComposerWidget extends WidgetType {
 
   override toDOM(view: EditorView): HTMLElement {
     const close = () => view.dispatch({ effects: closeComposer.of(null) })
+    const kind = kindChooser('fix')
 
     const body = editor({
       initialValue: '',
       placeholder: 'What should the agent do here?',
       confirmLabel: 'Leave Note',
-      onConfirm: (text) => this.handlers.create({ from: this.from, to: this.to }, text),
+      lead: kind.node,
+      onConfirm: (text) =>
+        this.handlers.create(
+          { from: this.from, to: this.to },
+          { body: text, kind: kind.chosen() },
+        ),
       onCancel: close,
     })
 
@@ -173,6 +254,7 @@ export class ThreadWidget extends WidgetType {
       other.note.id === this.note.id &&
       other.note.body === this.note.body &&
       other.note.updatedAt === this.note.updatedAt &&
+      other.note.kind === this.note.kind &&
       other.note.status === this.note.status &&
       other.note.replies.length === this.note.replies.length &&
       other.collapsed === this.collapsed &&
@@ -202,6 +284,7 @@ export class ThreadWidget extends WidgetType {
           'div',
           'cm-noteHeader',
           element('span', 'cm-noteHeaderLabel', 'Note'),
+          kindChip(note.kind),
           statusChip(note.status),
           element('span', 'cm-noteSummary', summary),
           replyCount,
@@ -215,11 +298,16 @@ export class ThreadWidget extends WidgetType {
       'div',
       'cm-noteHeader',
       element('span', 'cm-noteHeaderLabel', 'Note'),
+      kindChip(note.kind),
       statusChip(note.status),
       button('Collapse', 'cm-noteButton cm-noteButton--quiet', toggle),
     )
 
     if (this.editing) {
+      // Editing a Note is where its Kind can be changed: the reviewer often
+      // only realises it was a Question once they have written it out.
+      const kind = kindChooser(note.kind)
+
       const thread = element(
         'div',
         `cm-noteThread cm-noteThread--${note.status}`,
@@ -228,7 +316,8 @@ export class ThreadWidget extends WidgetType {
           initialValue: note.body,
           placeholder: 'What should the agent do here?',
           confirmLabel: 'Save',
-          onConfirm: (text) => this.handlers.update(note.id, text),
+          lead: kind.node,
+          onConfirm: (text) => this.handlers.update(note.id, { body: text, kind: kind.chosen() }),
           onCancel: () => view.dispatch({ effects: setEditing.of(null) }),
         }),
       )

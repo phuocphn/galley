@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Handoff, Note, ReviewListing, Sidecar } from '../src/shared/types.js'
+import type { Handoff, Note, NoteKind, ReviewListing, Sidecar } from '../src/shared/types.js'
 import { createReviewFixture, type ReviewFixture } from './helpers/review-fixture.js'
 
 const DRAFT = `# Release notes
@@ -18,11 +18,16 @@ function json(method: string, value: unknown): RequestInit {
   return { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) }
 }
 
-async function noteOn(review: ReviewFixture, phrase: string, body: string): Promise<Note> {
+async function noteOn(
+  review: ReviewFixture,
+  phrase: string,
+  body: string,
+  kind?: NoteKind,
+): Promise<Note> {
   const from = DRAFT.indexOf(phrase)
   return review.getJson<Note>(
     '/api/notes',
-    json('POST', { draftPath: 'notes.md', from, to: from + phrase.length, body }),
+    json('POST', { draftPath: 'notes.md', from, to: from + phrase.length, body, kind }),
   )
 }
 
@@ -137,11 +142,59 @@ describe('the handoff instruction', () => {
 
     expect(handoff.openNoteCount).toBe(1)
     expect(handoff.instruction).toContain('.feedback/notes.json')
-    expect(handoff.instruction).toContain('1 Note still open')
+    expect(handoff.instruction).toContain('1 Note is still open')
     expect(handoff.instruction).toContain('anchor.text')
     expect(handoff.instruction).toContain('"author": "agent"')
     expect(handoff.instruction).toContain('answered')
     expect(handoff.instruction).toContain('notes.md')
+    expect(handoff.instruction).toContain('`kind`')
+    expect(handoff.instruction).toContain('1 asks for a fix')
+  })
+
+  it('says what each Kind present is asking for, before the mechanics', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+    await noteOn(fixture, 'three things', 'Name them.', 'fix')
+    await noteOn(fixture, 'this week', 'Was this the same week as the outage?', 'question')
+    await noteOn(fixture, 'Release notes', 'A subtitle might help.', 'idea')
+
+    const handoff = await fixture.getJson<Handoff>('/api/handoff')
+
+    expect(handoff.instruction).toContain('1 asks for a fix, 1 is a question, and 1 is an idea')
+    expect(handoff.instruction).toContain('`fix` — change the anchored text')
+    expect(handoff.instruction).toContain('`idea` — a suggestion, not an instruction')
+
+    // The whole point of a Question: an answer, not an edit — and said before
+    // the step-by-step, so an agent that skims the top still sees it.
+    expect(handoff.instruction).toContain(
+      '`question` — the reviewer is asking you something. Answer it in a Reply and leave the Draft alone. Do not edit anything for a Question.',
+    )
+    expect(handoff.instruction.indexOf('`question` —')).toBeLessThan(
+      handoff.instruction.indexOf('How to work through it:'),
+    )
+  })
+
+  it('explains only the Kinds that are actually present', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+    await noteOn(fixture, 'three things', 'Name them.')
+    await noteOn(fixture, 'Release notes', 'Capitalise this.')
+
+    const handoff = await fixture.getJson<Handoff>('/api/handoff')
+
+    expect(handoff.instruction).toContain('2 ask for a fix')
+    expect(handoff.instruction).not.toContain('`question`')
+    expect(handoff.instruction).not.toContain('`idea`')
+  })
+
+  it('leaves a Resolved Note out of the Kind tally', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+    await noteOn(fixture, 'three things', 'Name them.', 'question')
+    const done = await noteOn(fixture, 'Release notes', 'Capitalise this.', 'idea')
+    await fixture.request(`/api/notes/${done.id}/resolve`, { method: 'POST' })
+
+    const handoff = await fixture.getJson<Handoff>('/api/handoff')
+
+    expect(handoff.instruction).toContain('Of those, 1 is a question.')
+    expect(handoff.instruction).not.toContain('`idea`')
   })
 
   it('tells the agent the Drafts may have been hand-edited', async () => {
@@ -173,7 +226,7 @@ describe('the handoff instruction', () => {
 
     expect(handoff.openNoteCount).toBe(1)
     expect(handoff.answeredNoteCount).toBe(1)
-    expect(handoff.instruction).toContain('1 Note already answered but not yet accepted')
+    expect(handoff.instruction).toContain('1 Note has already been answered but not yet accepted')
   })
 
   it('says there is nothing to do when every Note is resolved', async () => {
