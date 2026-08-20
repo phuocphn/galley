@@ -2,6 +2,9 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { DRAFT_EXTENSIONS, type DraftExtension, type DraftSummary } from '../shared/types.js'
 
+/** A Draft as the filesystem knows it, before its Notes are counted in. */
+export type DraftFile = Omit<DraftSummary, 'openNoteCount'>
+
 /** Directories never worth walking into when looking for Drafts. */
 const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', '.feedback'])
 
@@ -16,8 +19,8 @@ function draftExtensionOf(filename: string): DraftExtension | undefined {
  * Every Draft in the Review, at any depth, with paths relative to the Review
  * root. The listing is flat and sorted; the sidebar builds the tree from it.
  */
-export async function listDrafts(reviewRoot: string): Promise<DraftSummary[]> {
-  const drafts: DraftSummary[] = []
+export async function listDrafts(reviewRoot: string): Promise<DraftFile[]> {
+  const drafts: DraftFile[] = []
 
   async function walk(directory: string): Promise<void> {
     const entries = await readdir(directory, { withFileTypes: true })

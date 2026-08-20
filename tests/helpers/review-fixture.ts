@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createReviewApp } from '../../src/server/app.js'
@@ -13,9 +13,9 @@ export interface ReviewFixture {
   /** Absolute path of the Review root. */
   root: string
   /** Make a request against the Review API. */
-  request(pathname: string): Promise<Response>
+  request(pathname: string, init?: RequestInit): Promise<Response>
   /** Fetch and parse a JSON response, failing loudly on a non-2xx. */
-  getJson<T>(pathname: string): Promise<T>
+  getJson<T>(pathname: string, init?: RequestInit): Promise<T>
   /** Write a file into the Review, creating parent folders as needed. */
   write(relativePath: string, contents: string): Promise<void>
   /**
@@ -23,6 +23,8 @@ export interface ReviewFixture {
    * tested against something that genuinely exists.
    */
   writeOutside(relativePath: string, contents: string): Promise<void>
+  /** Read a file from the Review as text, or undefined if it isn't there. */
+  read(relativePath: string): Promise<string | undefined>
   /** Remove the Review from disk. */
   cleanup(): Promise<void>
 }
@@ -52,20 +54,27 @@ export async function createReviewFixture(
     await write(relativePath, contents)
   }
 
-  const request = async (pathname: string): Promise<Response> =>
-    await app.request(new Request(`http://localhost${pathname}`))
+  const request = async (pathname: string, init?: RequestInit): Promise<Response> =>
+    await app.request(new Request(`http://localhost${pathname}`, init))
 
   return {
     root,
     request,
     write,
     writeOutside: writeUnder(container),
-    async getJson<T>(pathname: string): Promise<T> {
-      const response = await request(pathname)
+    async getJson<T>(pathname: string, init?: RequestInit): Promise<T> {
+      const response = await request(pathname, init)
       if (!response.ok) {
         throw new Error(`${pathname} responded ${response.status}: ${await response.text()}`)
       }
       return (await response.json()) as T
+    },
+    async read(relativePath: string): Promise<string | undefined> {
+      try {
+        return await readFile(path.join(root, relativePath), 'utf8')
+      } catch {
+        return undefined
+      }
     },
     cleanup: () => rm(container, { recursive: true, force: true }),
   }

@@ -37,7 +37,7 @@ describe('listing a Review', () => {
     const review = await fixture.getJson<ReviewListing>('/api/review')
 
     expect(review.drafts).toEqual([
-      { path: 'guides/setup.md', name: 'setup.md', extension: '.md' },
+      { path: 'guides/setup.md', name: 'setup.md', extension: '.md', openNoteCount: 0 },
     ])
   })
 
@@ -83,7 +83,7 @@ describe('reading a Draft', () => {
 
     const draft = await fixture.getJson<DraftContents>(draftUrl('guides/setup.md'))
 
-    expect(draft).toEqual({ path: 'guides/setup.md', extension: '.md', content })
+    expect(draft).toEqual({ path: 'guides/setup.md', extension: '.md', content, notes: [] })
   })
 
   it('handles a Draft whose name needs escaping in a URL', async () => {
