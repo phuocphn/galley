@@ -303,6 +303,9 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
     // Dispatched while the conflict still stands, so autosave stays out of it.
     stopIdleTimer()
     setConflict(undefined)
+    // The buffer that failed to save has just been discarded, so any earlier
+    // "could not be written" complaint is about work that no longer exists.
+    setSaveError(undefined)
   }, [conflict, stopIdleTimer])
 
   useEffect(() => {
