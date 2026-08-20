@@ -165,7 +165,7 @@ export function App() {
             scope="review"
             subject={review.name}
             notes={review.reviewNotes}
-            onCreate={(body) => void createNote({ body }).then(refresh)}
+            onCreate={(body, kind) => void createNote({ body, kind }).then(refresh)}
             onReply={(id, body) => void addReply(id, body).then(refresh)}
             onResolve={(id) => void resolveNote(id).then(refresh)}
             onDelete={(id) => void deleteNote(id).then(refresh)}
@@ -192,7 +192,9 @@ export function App() {
                 scope="draft"
                 subject={selectedPath}
                 notes={draftScopeNotes}
-                onCreate={(body) => void createNote({ draftPath: selectedPath, body }).then(refresh)}
+                onCreate={(body, kind) =>
+                  void createNote({ draftPath: selectedPath, body, kind }).then(refresh)
+                }
                 onReply={(id, body) => void addReply(id, body).then(refresh)}
                 onResolve={(id) => void resolveNote(id).then(refresh)}
                 onDelete={(id) => void deleteNote(id).then(refresh)}

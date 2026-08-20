@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { NoteScope } from '../../shared/scope.js'
-import type { Note } from '../../shared/types.js'
+import { NOTE_KINDS, type Note, type NoteKind } from '../../shared/types.js'
 
 interface ScopedNotesProps {
   /** Which Scope this list is for. Only `draft` and `review` come through here. */
@@ -9,7 +9,7 @@ interface ScopedNotesProps {
   subject: string
   /** Every Note at this Scope, Resolved ones included. */
   notes: Note[]
-  onCreate: (body: string) => void
+  onCreate: (body: string, kind: NoteKind) => void
   onReply: (id: string, body: string) => void
   onResolve: (id: string) => void
   onDelete: (id: string) => void
@@ -75,8 +75,9 @@ export function ScopedNotes({
               : `Guidance for the whole of ${subject} — "this file needs a summary section"`
           }
           submitLabel="Add"
-          onSubmit={(body) => {
-            onCreate(body)
+          withKind
+          onSubmit={(body, kind) => {
+            onCreate(body, kind)
             setComposing(false)
           }}
           onCancel={() => setComposing(false)}
@@ -132,6 +133,7 @@ function ScopedNote({ note, onReply, onResolve, onDelete }: ScopedNoteProps) {
   return (
     <li className="mt-2 rounded-md border border-[var(--review-border)] bg-white p-2.5 text-[13px] first:mt-0">
       <div className="mb-1 flex items-center gap-2">
+        <KindTag kind={note.kind} />
         <StatusBadge status={note.status} />
         <span className="text-[11.5px] text-[var(--review-dim)]">
           {new Date(note.createdAt).toLocaleString()}
@@ -203,12 +205,15 @@ function StatusBadge({ status }: { status: Note['status'] }) {
 interface ComposerProps {
   placeholder: string
   submitLabel: string
-  onSubmit: (body: string) => void
+  /** Offered only when starting a Note; a Reply has no Kind of its own. */
+  withKind?: boolean
+  onSubmit: (body: string, kind: NoteKind) => void
   onCancel: () => void
 }
 
-function Composer({ placeholder, submitLabel, onSubmit, onCancel }: ComposerProps) {
+function Composer({ placeholder, submitLabel, withKind, onSubmit, onCancel }: ComposerProps) {
   const [body, setBody] = useState('')
+  const [kind, setKind] = useState<NoteKind>('fix')
   const ready = body.trim() !== ''
 
   return (
@@ -216,9 +221,10 @@ function Composer({ placeholder, submitLabel, onSubmit, onCancel }: ComposerProp
       className="mt-2"
       onSubmit={(event) => {
         event.preventDefault()
-        if (ready) onSubmit(body.trim())
+        if (ready) onSubmit(body.trim(), kind)
       }}
     >
+      {withKind && <KindChooser chosen={kind} onChoose={setKind} />}
       <textarea
         autoFocus
         rows={3}
@@ -230,7 +236,7 @@ function Composer({ placeholder, submitLabel, onSubmit, onCancel }: ComposerProp
         onKeyDown={(event) => {
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && ready) {
             event.preventDefault()
-            onSubmit(body.trim())
+            onSubmit(body.trim(), kind)
           }
           if (event.key === 'Escape') onCancel()
         }}
@@ -246,6 +252,53 @@ function Composer({ placeholder, submitLabel, onSubmit, onCancel }: ComposerProp
       </div>
     </form>
   )
+}
+
+const KIND_HINTS: Record<NoteKind, string> = {
+  fix: 'Change this.',
+  question: 'Answer me in a Reply — don\u2019t edit.',
+  idea: 'Optional — use your judgement.',
+}
+
+/**
+ * The same Fix / Question / Idea choice the pane's composer offers. A Note that
+ * asks a question wants an answer rather than an edit whether it is about one
+ * sentence or the whole folder, so the Scopes have to agree on this.
+ */
+function KindChooser({
+  chosen,
+  onChoose,
+}: {
+  chosen: NoteKind
+  onChoose: (kind: NoteKind) => void
+}) {
+  return (
+    <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+      <div className="flex rounded-full border border-[var(--review-border)] p-0.5">
+        {NOTE_KINDS.map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            aria-pressed={kind === chosen}
+            onClick={() => onChoose(kind)}
+            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${
+              kind === chosen
+                ? 'bg-[var(--review-muted)] text-[var(--review-text)]'
+                : 'text-[var(--review-dim)] hover:text-[var(--review-text)]'
+            }`}
+          >
+            {kind}
+          </button>
+        ))}
+      </div>
+      <span className="text-[11px] text-[var(--review-dim)]">{KIND_HINTS[chosen]}</span>
+    </div>
+  )
+}
+
+/** Matches the Kind tag in the pane: a squared tag with a dot, not a Status pill. */
+function KindTag({ kind }: { kind: NoteKind }) {
+  return <span className={`cm-noteKind cm-noteKind--${kind} capitalize`}>{kind}</span>
 }
 
 const BUTTON =

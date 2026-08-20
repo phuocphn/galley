@@ -268,7 +268,7 @@ describe('what the agent is told', () => {
     const handoff = await fixture.getJson<Handoff>('/api/handoff')
 
     expect(handoff.openNoteCount).toBe(1)
-    expect(handoff.instruction).toContain('1 Note still open')
+    expect(handoff.instruction).toContain('1 Note is still open')
     expect(handoff.instruction).toContain('no `draftPath`')
     expect(handoff.instruction).toMatch(/every Draft in the folder/)
   })
@@ -281,7 +281,7 @@ describe('what the agent is told', () => {
 
     const { instruction } = await fixture.getJson<Handoff>('/api/handoff')
 
-    expect(instruction).toContain('3 Notes still open')
+    expect(instruction).toContain('3 Notes are still open')
     // A passage, a whole Draft, and the whole folder.
     expect(instruction).toContain('anchor.text')
     expect(instruction).toContain('no `anchor`')
@@ -326,4 +326,38 @@ describe('refusing a malformed Note', () => {
       expect(await readSidecar(fixture)).toBeUndefined()
     })
   }
+})
+
+describe('Kinds at every Scope', () => {
+  it('lets a Draft Note and a Review Note be Questions too', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+
+    const draftNote = await fixture.getJson<Note>(
+      '/api/notes',
+      json('POST', { draftPath: 'notes.md', body: 'Why is this structured this way?', kind: 'question' }),
+    )
+    const reviewNote = await fixture.getJson<Note>(
+      '/api/notes',
+      json('POST', { body: 'Should any of these files exist at all?', kind: 'question' }),
+    )
+
+    expect(draftNote.kind).toBe('question')
+    expect(reviewNote.kind).toBe('question')
+
+    // A Question is a Question wherever it is: the agent is told to answer it
+    // rather than edit, and that must not depend on how far the Note reaches.
+    const handoff = await fixture.getJson<Handoff>('/api/handoff')
+    expect(handoff.instruction).toContain('2 are questions')
+  })
+
+  it('defaults a scoped Note to Fix when no Kind is given', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+
+    const note = await fixture.getJson<Note>(
+      '/api/notes',
+      json('POST', { body: 'Stop using em dashes anywhere.' }),
+    )
+
+    expect(note.kind).toBe('fix')
+  })
 })
