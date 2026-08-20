@@ -6,9 +6,12 @@ import {
   noteLines,
   notesField,
   openComposer,
+  reattachingField,
   setDraggedLines,
   setHoveredLine,
+  setReattaching,
 } from './state.js'
+import type { NoteHandlers } from './widgets.js'
 
 /** The blue **+** revealed by hovering a line number. */
 class AddNoteMarker extends GutterMarker {
@@ -69,7 +72,7 @@ const gutterPointerHandlers = {
  * The Note gutter: line numbers, a **+** wherever the pointer is (or wherever a
  * drag reaches), and a standing mark on every line a Note covers.
  */
-export function noteGutter(): Extension {
+export function noteGutter(handlers: NoteHandlers): Extension {
   return [
     lineNumbers({ domEventHandlers: gutterPointerHandlers }),
 
@@ -115,6 +118,16 @@ export function noteGutter(): Extension {
         const span = draggedSpan(drag)
         const from = view.state.doc.line(span.start).from
         const to = view.state.doc.line(span.end).to
+
+        // While an Orphaned Note is being re-attached, choosing a range points
+        // that Note at it rather than starting a new one.
+        const reattaching = view.state.field(reattachingField)
+        if (reattaching) {
+          view.dispatch({ effects: [setDraggedLines.of(null), setReattaching.of(null)] })
+          void handlers.reattach(reattaching, { from, to })
+          return
+        }
+
         view.dispatch({
           effects: [setDraggedLines.of(null), openComposer.of({ from, to })],
         })

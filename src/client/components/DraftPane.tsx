@@ -5,9 +5,16 @@ import { EditorState, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { DraftContents, DraftExtension } from '../../shared/types.js'
-import { addReply, createNote, deleteNote, resolveNote, updateNote } from '../api.js'
+import {
+  addReply,
+  createNote,
+  deleteNote,
+  reanchorNote,
+  resolveNote,
+  updateNote,
+} from '../api.js'
 import { notes, setNotes, type NoteHandlers } from '../notes/index.js'
-import { closeComposer, setEditing } from '../notes/state.js'
+import { closeComposer, setEditing, setReattaching } from '../notes/state.js'
 import { previewKindFor } from '../preview/document.js'
 import { usePreviewMode } from '../preview/mode.js'
 import { DraftPreview } from './DraftPreview.js'
@@ -26,11 +33,15 @@ function languageFor(extension: DraftExtension): Extension[] {
 
 interface DraftPaneProps {
   draft: DraftContents
+  /** The Orphaned Note the reviewer is pointing at new text, if any. */
+  reattaching: string | undefined
   /** Called after a Note is added, edited, or removed. */
   onNotesChanged: () => Promise<void>
+  /** Called once an Orphaned Note has been given a new Anchor. */
+  onReattached: () => void
 }
 
-export function DraftPane({ draft, onNotesChanged }: DraftPaneProps) {
+export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: DraftPaneProps) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView>(null)
   /** Where the source view was scrolled to when the preview took the pane. */
@@ -45,8 +56,8 @@ export function DraftPane({ draft, onNotesChanged }: DraftPaneProps) {
 
   // The extension is built once per view, so it reads the current callbacks
   // through a ref rather than closing over the render that created it.
-  const latest = useRef({ draftPath: draft.path, onNotesChanged })
-  latest.current = { draftPath: draft.path, onNotesChanged }
+  const latest = useRef({ draftPath: draft.path, onNotesChanged, onReattached })
+  latest.current = { draftPath: draft.path, onNotesChanged, onReattached }
 
   const handlers = useMemo<NoteHandlers>(
     () => ({
@@ -70,6 +81,11 @@ export function DraftPane({ draft, onNotesChanged }: DraftPaneProps) {
       },
       async resolve(id) {
         await resolveNote(id)
+        await latest.current.onNotesChanged()
+      },
+      async reattach(id, range) {
+        await reanchorNote(id, range)
+        latest.current.onReattached()
         await latest.current.onNotesChanged()
       },
     }),
@@ -110,6 +126,10 @@ export function DraftPane({ draft, onNotesChanged }: DraftPaneProps) {
   useEffect(() => {
     view.current?.dispatch({ effects: setNotes.of(draft.notes) })
   }, [draft.notes])
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: setReattaching.of(reattaching ?? null) })
+  }, [reattaching])
 
   /**
    * The source view is hidden, never unmounted, while the preview is up. Its

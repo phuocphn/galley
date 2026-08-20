@@ -1,7 +1,14 @@
 import { StateField, type EditorState, type Extension } from '@codemirror/state'
 import { EditorView, showTooltip, type Tooltip, type TooltipView } from '@codemirror/view'
 import { button } from './dom.js'
-import { composerField, notesField, openComposer } from './state.js'
+import {
+  composerField,
+  notesField,
+  openComposer,
+  reattachingField,
+  setReattaching,
+} from './state.js'
+import type { NoteHandlers } from './widgets.js'
 
 /**
  * The floating **Add note** button, revealed by selecting text in a Draft.
@@ -30,10 +37,11 @@ function anchorableSelection(state: EditorState): { from: number; to: number } |
 
   // Saving a Note leaves the selection where it was, so without this the button
   // would sit over the Note the reviewer just wrote, offering to write it again.
+  // While re-attaching, though, the button is the whole point.
   const alreadyNoted = state
     .field(notesField)
     .some((note) => note.range?.from === from && note.range.to === to)
-  if (alreadyNoted) return null
+  if (alreadyNoted && !state.field(reattachingField)) return null
 
   return { from, to }
 }
@@ -43,13 +51,34 @@ function anchorableSelection(state: EditorState): { from: number; to: number } |
  * function, so this is defined once and reads the selection at click time
  * rather than closing over the range it was built for.
  */
-function createAddNoteButton(view: EditorView): TooltipView {
-  const add = button('Add note', 'cm-addNoteToSelection', () => {
-    const range = anchorableSelection(view.state)
-    if (!range) return
-    view.dispatch({ effects: openComposer.of(range) })
-  })
-  add.title = 'Leave a Note on the selected text'
+function makeAddNoteButton(handlers: NoteHandlers) {
+  return function createAddNoteButton(view: EditorView): TooltipView {
+    return addNoteButtonView(view, handlers)
+  }
+}
+
+function addNoteButtonView(view: EditorView, handlers: NoteHandlers): TooltipView {
+  const reattaching = view.state.field(reattachingField)
+
+  const add = button(
+    reattaching ? 'Re-attach here' : 'Add note',
+    'cm-addNoteToSelection',
+    () => {
+      const range = anchorableSelection(view.state)
+      if (!range) return
+
+      const id = view.state.field(reattachingField)
+      if (id) {
+        view.dispatch({ effects: setReattaching.of(null) })
+        void handlers.reattach(id, range)
+        return
+      }
+      view.dispatch({ effects: openComposer.of(range) })
+    },
+  )
+  add.title = reattaching
+    ? 'Point the Orphaned Note at this text'
+    : 'Leave a Note on the selected text'
 
   // Pressing a control outside the text would ordinarily move focus and drop
   // the selection before the click lands — and, once Drafts are editable, move
@@ -60,14 +89,17 @@ function createAddNoteButton(view: EditorView): TooltipView {
   return { dom: add, offset: { x: 0, y: LIFT } }
 }
 
-function addNoteTooltip(range: { from: number; to: number }): Tooltip {
+function addNoteTooltip(
+  range: { from: number; to: number },
+  create: (view: EditorView) => TooltipView,
+): Tooltip {
   return {
     pos: range.from,
     end: range.to,
     // Above the selection, so the button never covers the words being judged.
     // CodeMirror drops it below when the selection starts at the top edge.
     above: true,
-    create: createAddNoteButton,
+    create,
   }
 }
 
@@ -75,19 +107,30 @@ function addNoteTooltip(range: { from: number; to: number }): Tooltip {
  * The button follows the selection. Nothing here creates a Note: dismissing the
  * selection just takes the field back to null and the button with it.
  */
-const addNoteTooltipField = StateField.define<Tooltip | null>({
-  create(state) {
-    const range = anchorableSelection(state)
-    return range ? addNoteTooltip(range) : null
-  },
-  update(current, transaction) {
-    const range = anchorableSelection(transaction.state)
-    if (!range) return null
-    if (current && current.pos === range.from && current.end === range.to) return current
-    return addNoteTooltip(range)
-  },
-  provide: (field) => showTooltip.from(field),
-})
+function addNoteTooltipField(handlers: NoteHandlers): StateField<Tooltip | null> {
+  // Stable per extension instance, so CodeMirror keeps reusing the button's DOM
+  // instead of rebuilding it under the pointer on every selection change.
+  const create = makeAddNoteButton(handlers)
+
+  return StateField.define<Tooltip | null>({
+    create(state) {
+      const range = anchorableSelection(state)
+      return range ? addNoteTooltip(range, create) : null
+    },
+    update(current, transaction) {
+      const range = anchorableSelection(transaction.state)
+      if (!range) return null
+
+      const startedReattaching = transaction.startState.field(reattachingField) !==
+        transaction.state.field(reattachingField)
+      if (!startedReattaching && current && current.pos === range.from && current.end === range.to) {
+        return current
+      }
+      return addNoteTooltip(range, create)
+    },
+    provide: (field) => showTooltip.from(field),
+  })
+}
 
 // The button *is* the tooltip element, so CodeMirror's own panel styling and
 // this button's styling land on the same node. Everything therefore has to sit
@@ -119,6 +162,6 @@ const addNoteTooltipTheme = EditorView.baseTheme({
 })
 
 /** Selecting text in the Draft offers to open the composer over that range. */
-export function selectionNoteButton(): Extension {
-  return [addNoteTooltipField, addNoteTooltipTheme]
+export function selectionNoteButton(handlers: NoteHandlers): Extension {
+  return [addNoteTooltipField(handlers), addNoteTooltipTheme]
 }

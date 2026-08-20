@@ -11,6 +11,8 @@ export interface NoteHandlers {
   remove(id: string): Promise<void>
   reply(id: string, body: string): Promise<void>
   resolve(id: string): Promise<void>
+  /** Point an Orphaned Note at new text. */
+  reattach(id: string, range: { from: number; to: number }): Promise<void>
 }
 
 const STATUS_LABELS: Record<NoteStatus, string> = {

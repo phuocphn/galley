@@ -48,6 +48,12 @@ export interface Anchor {
   startLine: number
   /** 1-based line the anchor ended on when the Note was written. */
   endLine: number
+  /**
+   * Set when the anchored text can no longer be found in the Draft — usually
+   * because the agent rewrote that passage away. The Note is still outstanding;
+   * it just doesn't know where it belongs any more.
+   */
+  orphaned?: boolean
 }
 
 /**
@@ -89,6 +95,17 @@ export interface Note {
 export interface ResolvedNote extends Note {
   /** Character offsets into the current Draft, or null if it wasn't found. */
   range: { from: number; to: number } | null
+  /**
+   * How the Anchor was found. `reworded` means the passage changed but stayed
+   * recognisable, which is worth showing the reviewer.
+   */
+  match: 'exact' | 'reworded' | 'orphaned'
+}
+
+/** What the client sends to re-attach an Orphaned Note to new text. */
+export interface Reanchor {
+  from: number
+  to: number
 }
 
 /** What the client sends to attach a new Note. */
