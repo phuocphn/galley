@@ -3,6 +3,7 @@ import type {
   Handoff,
   NewNote,
   Note,
+  NoteChange,
   Reanchor,
   ReplyAuthor,
   ReviewListing,
@@ -45,8 +46,12 @@ export function createNote(note: NewNote): Promise<Note> {
   return send<Note>('/api/notes', asJson('POST', note))
 }
 
-export function updateNote(id: string, body: string): Promise<Note> {
-  return send<Note>(`/api/notes/${id}`, asJson('PATCH', { body }))
+/** A bare string is the Note's new text, the long-hand form its new Kind too. */
+export function updateNote(id: string, change: string | NoteChange): Promise<Note> {
+  return send<Note>(
+    `/api/notes/${id}`,
+    asJson('PATCH', typeof change === 'string' ? { body: change } : change),
+  )
 }
 
 export function deleteNote(id: string): Promise<void> {

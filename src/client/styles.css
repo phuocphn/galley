@@ -321,6 +321,86 @@ body {
   opacity: 0.72;
 }
 
+/* Kind: what a Note asks the agent to do. Question is the loud one, because it
+   is the one that stops the agent editing. Idea is deliberately quiet. */
+.cm-noteKind--fix {
+  --kind-border: #0969da55;
+  --kind-background: #ddf4ff;
+  --kind-text: #0550ae;
+}
+
+.cm-noteKind--question {
+  --kind-border: #9a670055;
+  --kind-background: #fff8c5;
+  --kind-text: #9a6700;
+}
+
+.cm-noteKind--idea {
+  --kind-border: var(--review-border);
+  --kind-background: var(--review-muted);
+  --kind-text: var(--review-dim);
+}
+
+.cm-noteKind {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--kind-border);
+  background: var(--kind-background);
+  color: var(--kind-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+/* The Fix / Question / Idea choice, above the textarea in the composer and in
+   edit mode. */
+.cm-noteKindChooser {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 10px 0 10px;
+}
+
+.cm-noteKindOptions {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--review-border);
+  border-radius: 999px;
+  background: var(--review-muted);
+}
+
+.cm-noteKindOption {
+  padding: 1px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--review-dim);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.cm-noteKindOption:hover {
+  color: var(--review-text);
+}
+
+.cm-noteKindOption--picked {
+  border-color: var(--kind-border);
+  background: var(--kind-background);
+  color: var(--kind-text);
+  cursor: default;
+}
+
+.cm-noteKindHint {
+  font-size: 11px;
+  color: var(--review-dim);
+}
+
 .cm-noteReplyCount {
   flex-shrink: 0;
   font-size: 11px;

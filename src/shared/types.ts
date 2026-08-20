@@ -65,6 +65,16 @@ export interface Anchor {
  */
 export type NoteStatus = 'open' | 'answered' | 'resolved'
 
+/**
+ * What a Note asks the agent to do. `fix` is what a Note is unless the
+ * reviewer says otherwise, and what a Note written before Kinds existed reads
+ * as. Each value changes what the agent does, not how loudly the Note is put:
+ * a `question` wants an answer in a Reply and no edit at all.
+ */
+export const NOTE_KINDS = ['fix', 'question', 'idea'] as const
+
+export type NoteKind = (typeof NOTE_KINDS)[number]
+
 /** Who wrote a Reply. */
 export type ReplyAuthor = 'agent' | 'reviewer'
 
@@ -85,6 +95,8 @@ export interface Note {
   anchor: Anchor
   /** Markdown. */
   body: string
+  /** What this Note asks the agent to do. */
+  kind: NoteKind
   status: NoteStatus
   replies: Reply[]
   createdAt: string
@@ -115,6 +127,14 @@ export interface NewNote {
   from: number
   to: number
   body: string
+  /** Omitted means Fix. */
+  kind?: NoteKind
+}
+
+/** What the client sends to change a saved Note: new text, a new Kind, or both. */
+export interface NoteChange {
+  body?: string
+  kind?: NoteKind
 }
 
 /** The shape of `.feedback/notes.json`. */

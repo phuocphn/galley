@@ -14,6 +14,7 @@ import type {
 } from '../shared/types.js'
 import { captureAnchor, locateAnchor } from './anchor.js'
 import { handoffInstruction } from './handoff.js'
+import { asNoteKind, DEFAULT_NOTE_KIND } from './kind.js'
 import { listDrafts, readDraft, writeDraft } from './review.js'
 import { mutateNotes, readNotes } from './sidecar.js'
 import { normalised, statusOf } from './status.js'
@@ -185,6 +186,9 @@ export function createReviewApp(reviewRoot: string): Hono {
       draftPath,
       anchor: captureAnchor(draft.content, from, to),
       body: body.trim(),
+      // An unrecognised Kind is treated as unsaid rather than refused: the
+      // sidecar is a file anything can write, and Fix is the safe reading.
+      kind: asNoteKind(submitted.kind) ?? DEFAULT_NOTE_KIND,
       status: 'open',
       replies: [],
       createdAt: now,
@@ -197,15 +201,23 @@ export function createReviewApp(reviewRoot: string): Hono {
 
   app.patch('/api/notes/:id', async (c) => {
     const id = c.req.param('id')
-    const submitted = (await c.req.json().catch(() => undefined)) as { body?: unknown } | undefined
+    const submitted = (await c.req.json().catch(() => undefined)) as
+      | { body?: unknown; kind?: unknown }
+      | undefined
 
-    if (typeof submitted?.body !== 'string' || submitted.body.trim() === '') {
+    const kind = asNoteKind(submitted?.kind)
+    const body = typeof submitted?.body === 'string' ? submitted.body.trim() : undefined
+
+    // Changing only the Kind is a legitimate edit; changing the text still
+    // needs some text.
+    if (body === '' || (body === undefined && !kind)) {
       return c.json({ error: 'A Note needs something to say' }, 400)
     }
 
     const updated = await changeNote(root, id, (note) => ({
       ...note,
-      body: (submitted.body as string).trim(),
+      body: body ?? note.body,
+      kind: kind ?? note.kind,
     }))
 
     if (!updated) return c.json({ error: `No such Note: ${id}` }, 404)

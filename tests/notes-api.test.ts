@@ -3,6 +3,7 @@ import type {
   DraftContents,
   NewNote,
   Note,
+  NoteKind,
   ReviewListing,
   Sidecar,
 } from '../src/shared/types.js'
@@ -41,11 +42,12 @@ async function noteOn(
   content: string,
   phrase: string,
   body: string,
+  kind?: NoteKind,
 ): Promise<Note> {
   const from = content.indexOf(phrase)
   expect(from, `"${phrase}" is not in the fixture Draft`).toBeGreaterThanOrEqual(0)
 
-  const submission: NewNote = { draftPath, from, to: from + phrase.length, body }
+  const submission: NewNote = { draftPath, from, to: from + phrase.length, body, kind }
   return review.getJson<Note>('/api/notes', jsonBody(submission))
 }
 
@@ -123,6 +125,21 @@ describe('attaching a Note', () => {
     expect(readme).toContain('Never rewrite `notes.json` wholesale')
   })
 
+  it('documents in the README what each Kind asks the agent to do', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+
+    await noteOn(fixture, 'notes.md', DRAFT, 'three things', 'Which three?')
+
+    const readme = await fixture.read('.feedback/README.md')!
+    expect(readme).toContain('`fix`')
+    expect(readme).toContain('`question`')
+    expect(readme).toContain('`idea`')
+    expect(readme).toMatch(/Answer it in a Reply and leave the Draft alone/)
+    expect(readme).toMatch(/A suggestion, not an instruction/)
+    // The agent has to know what an older sidecar without the field means.
+    expect(readme).toMatch(/no `kind`[\s\S]{0,80}Read it as `fix`/)
+  })
+
   it('keys Notes by Draft path so one sidecar covers the whole Review', async () => {
     fixture = await createReviewFixture({ 'notes.md': DRAFT, 'guides/setup.md': DRAFT })
 
@@ -165,6 +182,143 @@ describe('attaching a Note', () => {
     )
 
     expect(response.status).toBe(400)
+  })
+})
+
+describe('the Kind of a Note', () => {
+  it('records each Kind and reads it back through the API', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+
+    const fix = await noteOn(fixture, 'notes.md', DRAFT, 'three things', 'Name them.', 'fix')
+    const question = await noteOn(
+      fixture,
+      'notes.md',
+      DRAFT,
+      'this week',
+      'Was this the same week as the outage?',
+      'question',
+    )
+    const idea = await noteOn(
+      fixture,
+      'notes.md',
+      DRAFT,
+      'Nothing further',
+      'A closing line might land better.',
+      'idea',
+    )
+
+    expect([fix.kind, question.kind, idea.kind]).toEqual(['fix', 'question', 'idea'])
+
+    const sidecar = await readSidecar(fixture)
+    expect(sidecar?.notes.map((note) => note.kind)).toEqual(['fix', 'question', 'idea'])
+
+    const draft = await fixture.getJson<DraftContents>(draftUrl('notes.md'))
+    expect(draft.notes.map((note) => note.kind)).toEqual(['fix', 'question', 'idea'])
+  })
+
+  it('defaults to Fix when the composer did not say', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+
+    const note = await noteOn(fixture, 'notes.md', DRAFT, 'three things', 'Which three?')
+
+    expect(note.kind).toBe('fix')
+    expect((await readSidecar(fixture))?.notes[0]!.kind).toBe('fix')
+  })
+
+  it('treats a Kind it does not recognise as unsaid', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+
+    const note = await fixture.getJson<Note>(
+      '/api/notes',
+      jsonBody({ draftPath: 'notes.md', from: 0, to: 5, body: 'Odd Kind.', kind: 'urgent' }),
+    )
+
+    expect(note.kind).toBe('fix')
+  })
+
+  it('changes an existing Note’s Kind without touching its text', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+    const note = await noteOn(fixture, 'notes.md', DRAFT, 'three things', 'Which three?')
+
+    const changed = await fixture.getJson<Note>(`/api/notes/${note.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'question' }),
+    })
+
+    expect(changed.kind).toBe('question')
+    expect(changed.body).toBe('Which three?')
+    expect(Date.parse(changed.updatedAt)).toBeGreaterThanOrEqual(Date.parse(note.createdAt))
+    expect((await readSidecar(fixture))?.notes[0]!.kind).toBe('question')
+  })
+
+  it('changes the text and the Kind together', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+    const note = await noteOn(fixture, 'notes.md', DRAFT, 'three things', 'Which three?')
+
+    const changed = await fixture.getJson<Note>(`/api/notes/${note.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: 'Which three, and in what order?', kind: 'idea' }),
+    })
+
+    expect(changed).toMatchObject({ body: 'Which three, and in what order?', kind: 'idea' })
+  })
+
+  it('still refuses a change that says nothing at all', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+    const note = await noteOn(fixture, 'notes.md', DRAFT, 'three things', 'Which three?')
+
+    const empty = await fixture.request(`/api/notes/${note.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '   ' }),
+    })
+    const nothing = await fixture.request(`/api/notes/${note.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+
+    expect([empty.status, nothing.status]).toEqual([400, 400])
+    expect((await readSidecar(fixture))?.notes[0]!.body).toBe('Which three?')
+  })
+
+  it('reads a Note written before Kinds existed as a Fix', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+    await noteOn(fixture, 'notes.md', DRAFT, 'three things', 'Which three?')
+
+    // A sidecar from before this feature: every field except `kind`.
+    const sidecar = (await readSidecar(fixture))!
+    const { kind: _dropped, ...legacy } = sidecar.notes[0]!
+    await fixture.write(
+      '.feedback/notes.json',
+      JSON.stringify({ version: 1, notes: [legacy] }, null, 2),
+    )
+
+    const draft = await fixture.getJson<DraftContents>(draftUrl('notes.md'))
+
+    expect(draft.notes).toHaveLength(1)
+    expect(draft.notes[0]!.kind).toBe('fix')
+    expect(draft.notes[0]!.body).toBe('Which three?')
+    expect(draft.notes[0]!.range).not.toBeNull()
+  })
+
+  it('gives a Note that lost its Kind one back on the next write', async () => {
+    fixture = await createReviewFixture({ 'notes.md': DRAFT })
+    const note = await noteOn(fixture, 'notes.md', DRAFT, 'three things', 'Which three?')
+
+    const sidecar = (await readSidecar(fixture))!
+    const { kind: _dropped, ...legacy } = sidecar.notes[0]!
+    await fixture.write('.feedback/notes.json', JSON.stringify({ version: 1, notes: [legacy] }))
+
+    await fixture.request(`/api/notes/${note.id}/replies`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ author: 'agent', body: 'Named all three.' }),
+    })
+
+    expect((await readSidecar(fixture))?.notes[0]!.kind).toBe('fix')
   })
 })
 
