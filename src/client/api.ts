@@ -46,12 +46,8 @@ export function createNote(note: NewNote): Promise<Note> {
   return send<Note>('/api/notes', asJson('POST', note))
 }
 
-/** A bare string is the Note's new text, the long-hand form its new Kind too. */
-export function updateNote(id: string, change: string | NoteChange): Promise<Note> {
-  return send<Note>(
-    `/api/notes/${id}`,
-    asJson('PATCH', typeof change === 'string' ? { body: change } : change),
-  )
+export function updateNote(id: string, change: NoteChange): Promise<Note> {
+  return send<Note>(`/api/notes/${id}`, asJson('PATCH', change))
 }
 
 export function deleteNote(id: string): Promise<void> {

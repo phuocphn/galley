@@ -335,22 +335,41 @@ body {
   --kind-text: #9a6700;
 }
 
+/* Teal, not purple: purple is the Answered Status, and the two chips sit side
+   by side in the same header. */
 .cm-noteKind--idea {
-  --kind-border: var(--review-border);
-  --kind-background: var(--review-muted);
-  --kind-text: var(--review-dim);
+  --kind-border: #1b7c8355;
+  --kind-background: #ddf4f6;
+  --kind-text: #10646a;
 }
 
+/*
+ * A Kind and a Status sit side by side in the same header, so they must not
+ * read as the same kind of thing. Status is a filled pill; Kind is a squarer,
+ * quieter tag carrying a coloured dot. Colour alone was not enough — a
+ * resolved Idea showed two near-identical grey pills.
+ */
 .cm-noteKind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   flex-shrink: 0;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: 4px;
   border: 1px solid var(--kind-border);
   background: var(--kind-background);
   color: var(--kind-text);
   font-size: 11px;
   font-weight: 600;
   line-height: 1.5;
+}
+
+.cm-noteKind::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 /* The Fix / Question / Idea choice, above the textarea in the composer and in

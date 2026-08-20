@@ -116,9 +116,13 @@ function list(parts: string[]): string {
 }
 
 function summarise(open: number, answered: number): string {
-  const parts = [`${count(open, 'Note')} still open`]
+  // Each clause carries its own verb: with one Note open and one answered, a
+  // shared verb chosen from the total reads as "There are 1 Note still open".
+  const clauses = [`${count(open, 'Note')} ${open === 1 ? 'is' : 'are'} still open`]
   if (answered > 0) {
-    parts.push(`${count(answered, 'Note')} already answered but not yet accepted`)
+    clauses.push(
+      `${count(answered, 'Note')} ${answered === 1 ? 'has' : 'have'} already been answered but not yet accepted`,
+    )
   }
-  return `There ${open + answered === 1 ? 'is' : 'are'} ${parts.join(', and ')}.`
+  return `${clauses.join(', and ')}.`
 }

@@ -151,7 +151,7 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
 
   const handlers = useMemo<NoteHandlers>(
     () => ({
-      async create(range, body) {
+      async create(range, note) {
         // The server cuts the Anchor out of the file on disk, so the file has to
         // be saying what the reviewer is looking at before the Note is written.
         // While a conflict is unanswered nothing may be written, so the Anchor
@@ -160,12 +160,17 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
           throw new Error('This Draft changed on disk. Settle that first, then leave the Note.')
         }
         await flush()
-        await createNote({ draftPath: latest.current.draftPath, ...range, body })
+        await createNote({
+          draftPath: latest.current.draftPath,
+          ...range,
+          body: note.body,
+          kind: note.kind,
+        })
         view.current?.dispatch({ effects: closeComposer.of(null) })
         await latest.current.onNotesChanged()
       },
-      async update(id, body) {
-        await updateNote(id, body)
+      async update(id, change) {
+        await updateNote(id, change)
         view.current?.dispatch({ effects: setEditing.of(null) })
         await latest.current.onNotesChanged()
       },

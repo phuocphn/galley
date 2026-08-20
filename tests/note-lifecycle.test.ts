@@ -142,7 +142,7 @@ describe('the handoff instruction', () => {
 
     expect(handoff.openNoteCount).toBe(1)
     expect(handoff.instruction).toContain('.feedback/notes.json')
-    expect(handoff.instruction).toContain('1 Note still open')
+    expect(handoff.instruction).toContain('1 Note is still open')
     expect(handoff.instruction).toContain('anchor.text')
     expect(handoff.instruction).toContain('"author": "agent"')
     expect(handoff.instruction).toContain('answered')
@@ -226,7 +226,7 @@ describe('the handoff instruction', () => {
 
     expect(handoff.openNoteCount).toBe(1)
     expect(handoff.answeredNoteCount).toBe(1)
-    expect(handoff.instruction).toContain('1 Note already answered but not yet accepted')
+    expect(handoff.instruction).toContain('1 Note has already been answered but not yet accepted')
   })
 
   it('says there is nothing to do when every Note is resolved', async () => {

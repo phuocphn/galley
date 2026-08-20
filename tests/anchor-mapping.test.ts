@@ -30,6 +30,7 @@ function noteOn(content: string, phrase: string, id = 'note-1'): ResolvedNote {
     draftPath: 'findings.md',
     anchor: { text: phrase, before: '', after: '', startLine: 1, endLine: 1 },
     body: 'This claim is unsourced.',
+    kind: 'fix',
     status: 'open',
     replies: [],
     createdAt: WHEN,

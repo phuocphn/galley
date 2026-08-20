@@ -14,9 +14,9 @@ import { closeComposer, setEditing, toggleCollapsed } from './state.js'
 /** What a thread or composer can ask the app to do. */
 export interface NoteHandlers {
   /** The range the Note attaches to, plus the Kind the composer settled on. */
-  create(note: { from: number; to: number; kind: NoteKind }, body: string): Promise<void>
+  create(range: { from: number; to: number }, note: { body: string; kind: NoteKind }): Promise<void>
   /** New text, a new Kind, or both. A bare string is the new text. */
-  update(id: string, change: string | NoteChange): Promise<void>
+  update(id: string, change: NoteChange): Promise<void>
   remove(id: string): Promise<void>
   reply(id: string, body: string): Promise<void>
   resolve(id: string): Promise<void>
@@ -208,7 +208,10 @@ export class ComposerWidget extends WidgetType {
       confirmLabel: 'Leave Note',
       lead: kind.node,
       onConfirm: (text) =>
-        this.handlers.create({ from: this.from, to: this.to, kind: kind.chosen() }, text),
+        this.handlers.create(
+          { from: this.from, to: this.to },
+          { body: text, kind: kind.chosen() },
+        ),
       onCancel: close,
     })
 
