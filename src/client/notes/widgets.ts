@@ -1,5 +1,5 @@
 import { EditorView, WidgetType } from '@codemirror/view'
-import type { ResolvedNote } from '../../shared/types.js'
+import type { NoteStatus, Reply, ResolvedNote } from '../../shared/types.js'
 import { button, element } from './dom.js'
 import { renderMarkdown } from './markdown.js'
 import { closeComposer, setEditing, toggleCollapsed } from './state.js'
@@ -9,6 +9,36 @@ export interface NoteHandlers {
   create(range: { from: number; to: number }, body: string): Promise<void>
   update(id: string, body: string): Promise<void>
   remove(id: string): Promise<void>
+  reply(id: string, body: string): Promise<void>
+  resolve(id: string): Promise<void>
+}
+
+const STATUS_LABELS: Record<NoteStatus, string> = {
+  open: 'Open',
+  answered: 'Answered',
+  resolved: 'Resolved',
+}
+
+function statusChip(status: NoteStatus): HTMLElement {
+  return element('span', `cm-noteStatus cm-noteStatus--${status}`, STATUS_LABELS[status])
+}
+
+/** One Reply under a Note — the agent reporting back, or the reviewer pushing back. */
+function replyBlock(reply: Reply): HTMLElement {
+  const rendered = element('div', 'cm-noteBody')
+  rendered.innerHTML = renderMarkdown(reply.body)
+
+  return element(
+    'div',
+    `cm-noteReply cm-noteReply--${reply.author}`,
+    element(
+      'div',
+      'cm-noteReplyHeader',
+      element('span', 'cm-noteReplyAuthor', reply.author === 'agent' ? 'Agent' : 'You'),
+      element('span', 'cm-noteReplyWhen', new Date(reply.createdAt).toLocaleString()),
+    ),
+    rendered,
+  )
 }
 
 function lineRange(view: EditorView, from: number, to: number): string {
@@ -24,6 +54,8 @@ function editor(options: {
   confirmLabel: string
   onConfirm: (body: string) => Promise<void>
   onCancel: () => void
+  /** A reply box, which sits inside an existing thread and has no Cancel. */
+  quiet?: boolean
 }): HTMLElement {
   const textarea = element('textarea', 'cm-noteTextarea')
   textarea.value = options.initialValue
@@ -53,7 +85,7 @@ function editor(options: {
     }
   })
 
-  const cancel = button('Cancel', 'cm-noteButton', options.onCancel)
+  const cancel = options.quiet ? undefined : button('Cancel', 'cm-noteButton', options.onCancel)
 
   textarea.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -68,10 +100,10 @@ function editor(options: {
 
   return element(
     'div',
-    'cm-noteEditor',
+    options.quiet ? 'cm-noteEditor cm-noteEditor--reply' : 'cm-noteEditor',
     textarea,
     error,
-    element('div', 'cm-noteActions', confirm, cancel),
+    element('div', 'cm-noteActions', ...(cancel ? [confirm, cancel] : [confirm])),
   )
 }
 
@@ -132,10 +164,15 @@ export class ThreadWidget extends WidgetType {
   }
 
   override eq(other: ThreadWidget): boolean {
+    // Every field that changes what is drawn. An agent editing the sidecar by
+    // hand can change the Status without touching `updatedAt`, so Status and
+    // Reply count are compared in their own right.
     return (
       other.note.id === this.note.id &&
       other.note.body === this.note.body &&
       other.note.updatedAt === this.note.updatedAt &&
+      other.note.status === this.note.status &&
+      other.note.replies.length === this.note.replies.length &&
       other.collapsed === this.collapsed &&
       other.editing === this.editing
     )
@@ -147,14 +184,25 @@ export class ThreadWidget extends WidgetType {
 
     if (this.collapsed) {
       const summary = note.body.split('\n')[0] ?? ''
+      const replyCount =
+        note.replies.length > 0
+          ? element(
+              'span',
+              'cm-noteReplyCount',
+              `${note.replies.length} ${note.replies.length === 1 ? 'reply' : 'replies'}`,
+            )
+          : element('span', 'cm-noteReplyCount cm-noteReplyCount--none')
+
       const thread = element(
         'div',
-        'cm-noteThread cm-noteThread--collapsed',
+        `cm-noteThread cm-noteThread--collapsed cm-noteThread--${note.status}`,
         element(
           'div',
           'cm-noteHeader',
           element('span', 'cm-noteHeaderLabel', 'Note'),
+          statusChip(note.status),
           element('span', 'cm-noteSummary', summary),
+          replyCount,
           button('Expand', 'cm-noteButton cm-noteButton--quiet', toggle),
         ),
       )
@@ -165,13 +213,14 @@ export class ThreadWidget extends WidgetType {
       'div',
       'cm-noteHeader',
       element('span', 'cm-noteHeaderLabel', 'Note'),
+      statusChip(note.status),
       button('Collapse', 'cm-noteButton cm-noteButton--quiet', toggle),
     )
 
     if (this.editing) {
       const thread = element(
         'div',
-        'cm-noteThread',
+        `cm-noteThread cm-noteThread--${note.status}`,
         header,
         editor({
           initialValue: note.body,
@@ -188,19 +237,41 @@ export class ThreadWidget extends WidgetType {
     const rendered = element('div', 'cm-noteBody')
     rendered.innerHTML = renderMarkdown(note.body)
 
+    const actions = element(
+      'div',
+      'cm-noteActions',
+      button('Edit', 'cm-noteButton', () => view.dispatch({ effects: setEditing.of(note.id) })),
+      button('Delete', 'cm-noteButton cm-noteButton--danger', () => {
+        void this.handlers.remove(note.id)
+      }),
+    )
+
+    if (note.status !== 'resolved') {
+      actions.prepend(
+        button('Resolve', 'cm-noteButton cm-noteButton--primary', () => {
+          void this.handlers.resolve(note.id)
+        }),
+      )
+    }
+
     const thread = element(
       'div',
-      'cm-noteThread',
+      `cm-noteThread cm-noteThread--${note.status}`,
       header,
       rendered,
-      element(
-        'div',
-        'cm-noteActions',
-        button('Edit', 'cm-noteButton', () => view.dispatch({ effects: setEditing.of(note.id) })),
-        button('Delete', 'cm-noteButton cm-noteButton--danger', () => {
-          void this.handlers.remove(note.id)
-        }),
-      ),
+      ...note.replies.map(replyBlock),
+      actions,
+      // Always open, like a pull request thread: replying is one click, and
+      // replying to an Answered Note is how the reviewer pushes back.
+      editor({
+        initialValue: '',
+        placeholder:
+          note.status === 'answered' ? 'Not quite — reply to reopen…' : 'Reply…',
+        confirmLabel: 'Reply',
+        onConfirm: (text) => this.handlers.reply(note.id, text),
+        onCancel: () => {},
+        quiet: true,
+      }),
     )
 
     return element('div', 'cm-noteBlock', thread)

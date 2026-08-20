@@ -10,8 +10,10 @@ export interface DraftSummary {
   /** The file's own name, without its directory. */
   name: string
   extension: DraftExtension
-  /** How many Notes on this Draft are still open. */
+  /** How many Notes on this Draft are still Open. */
   openNoteCount: number
+  /** How many the agent has replied to but the reviewer hasn't Resolved. */
+  answeredNoteCount: number
 }
 
 /** Everything the client needs to render a Review's sidebar. */
@@ -48,8 +50,26 @@ export interface Anchor {
   endLine: number
 }
 
-/** Where a Note is in its life. Widens as the agent gets involved. */
-export type NoteStatus = 'open'
+/**
+ * Where a Note is in its life.
+ *
+ * `answered` and `open` follow from the Replies — the agent replies and the
+ * Note is Answered; the reviewer replies again and it is back to Open. Only
+ * `resolved` is a decision someone made rather than a consequence.
+ */
+export type NoteStatus = 'open' | 'answered' | 'resolved'
+
+/** Who wrote a Reply. */
+export type ReplyAuthor = 'agent' | 'reviewer'
+
+/** A response under a Note: what the agent changed, or the reviewer pushing back. */
+export interface Reply {
+  id: string
+  author: ReplyAuthor
+  /** Markdown. */
+  body: string
+  createdAt: string
+}
 
 /** One piece of guidance a reviewer attached to a Draft. */
 export interface Note {
@@ -60,6 +80,7 @@ export interface Note {
   /** Markdown. */
   body: string
   status: NoteStatus
+  replies: Reply[]
   createdAt: string
   updatedAt: string
 }
@@ -84,3 +105,15 @@ export interface Sidecar {
   version: 1
   notes: Note[]
 }
+
+/** The instruction the reviewer pastes into their agent. */
+export interface Handoff {
+  instruction: string
+  openNoteCount: number
+  answeredNoteCount: number
+}
+
+/** What the server pushes when the Review changes underneath the reviewer. */
+export type ReviewEvent =
+  | { type: 'draft-changed'; path: string }
+  | { type: 'notes-changed' }

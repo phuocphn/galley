@@ -3,18 +3,48 @@ import path from 'node:path'
 import { Hono } from 'hono'
 import type {
   DraftContents,
+  Handoff,
   NewNote,
   Note,
+  Reply,
+  ReplyAuthor,
   ResolvedNote,
   ReviewListing,
 } from '../shared/types.js'
 import { captureAnchor, locateAnchor } from './anchor.js'
+import { handoffInstruction } from './handoff.js'
 import { listDrafts, readDraft } from './review.js'
 import { mutateNotes, readNotes } from './sidecar.js'
+import { normalised, statusOf } from './status.js'
 
 /** Attach each Note to the Draft as it stands right now. */
 function resolveNotes(notes: Note[], content: string): ResolvedNote[] {
-  return notes.map((note) => ({ ...note, range: locateAnchor(content, note.anchor) ?? null }))
+  return notes.map((note) => ({
+    ...normalised(note),
+    range: locateAnchor(content, note.anchor) ?? null,
+  }))
+}
+
+/**
+ * Change one Note in place, returning it, or undefined if it isn't there.
+ * `updatedAt` moves on every change so the client can tell something happened.
+ */
+async function changeNote(
+  reviewRoot: string,
+  id: string,
+  change: (note: Note) => Note,
+): Promise<Note | undefined> {
+  let updated: Note | undefined
+
+  await mutateNotes(reviewRoot, (notes) =>
+    notes.map((note) => {
+      if (note.id !== id) return note
+      updated = { ...change(note), updatedAt: new Date().toISOString() }
+      return updated
+    }),
+  )
+
+  return updated
 }
 
 /**
@@ -31,12 +61,14 @@ export function createReviewApp(reviewRoot: string): Hono {
     const listing: ReviewListing = {
       root,
       name: path.basename(root),
-      drafts: drafts.map((draft) => ({
-        ...draft,
-        openNoteCount: notes.filter(
-          (note) => note.draftPath === draft.path && note.status === 'open',
-        ).length,
-      })),
+      drafts: drafts.map((draft) => {
+        const own = notes.filter((note) => note.draftPath === draft.path)
+        return {
+          ...draft,
+          openNoteCount: own.filter((note) => statusOf(note) === 'open').length,
+          answeredNoteCount: own.filter((note) => statusOf(note) === 'answered').length,
+        }
+      }),
     }
     return c.json(listing)
   })
@@ -87,6 +119,7 @@ export function createReviewApp(reviewRoot: string): Hono {
       anchor: captureAnchor(draft.content, from, to),
       body: body.trim(),
       status: 'open',
+      replies: [],
       createdAt: now,
       updatedAt: now,
     }
@@ -103,21 +136,64 @@ export function createReviewApp(reviewRoot: string): Hono {
       return c.json({ error: 'A Note needs something to say' }, 400)
     }
 
-    let updated: Note | undefined
-    await mutateNotes(root, (notes) =>
-      notes.map((note) => {
-        if (note.id !== id) return note
-        updated = {
-          ...note,
-          body: (submitted.body as string).trim(),
-          updatedAt: new Date().toISOString(),
-        }
-        return updated
-      }),
-    )
+    const updated = await changeNote(root, id, (note) => ({
+      ...note,
+      body: (submitted.body as string).trim(),
+    }))
 
     if (!updated) return c.json({ error: `No such Note: ${id}` }, 404)
     return c.json(updated)
+  })
+
+  app.post('/api/notes/:id/replies', async (c) => {
+    const id = c.req.param('id')
+    const submitted = (await c.req.json().catch(() => undefined)) as
+      | { body?: unknown; author?: unknown }
+      | undefined
+
+    if (typeof submitted?.body !== 'string' || submitted.body.trim() === '') {
+      return c.json({ error: 'A Reply needs something to say' }, 400)
+    }
+    const author: ReplyAuthor = submitted.author === 'agent' ? 'agent' : 'reviewer'
+
+    const reply: Reply = {
+      id: randomUUID(),
+      author,
+      body: submitted.body.trim(),
+      createdAt: new Date().toISOString(),
+    }
+
+    const updated = await changeNote(root, id, (note) => ({
+      ...note,
+      replies: [...note.replies, reply],
+      // A Reply from the reviewer reopens a Note the agent had answered.
+      status: author === 'agent' ? 'answered' : 'open',
+    }))
+
+    if (!updated) return c.json({ error: `No such Note: ${id}` }, 404)
+    return c.json(updated, 201)
+  })
+
+  app.post('/api/notes/:id/resolve', async (c) => {
+    const updated = await changeNote(root, c.req.param('id'), (note) => ({
+      ...note,
+      status: 'resolved',
+    }))
+
+    if (!updated) return c.json({ error: `No such Note: ${c.req.param('id')}` }, 404)
+    return c.json(updated)
+  })
+
+  app.get('/api/handoff', async (c) => {
+    const notes = await readNotes(root)
+    const outstanding = notes.filter((note) => statusOf(note) !== 'resolved')
+
+    const handoff: Handoff = {
+      instruction: handoffInstruction(root, notes),
+      openNoteCount: outstanding.filter((note) => statusOf(note) === 'open').length,
+      answeredNoteCount: outstanding.filter((note) => statusOf(note) === 'answered').length,
+    }
+    return c.json(handoff)
   })
 
   app.delete('/api/notes/:id', async (c) => {

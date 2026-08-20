@@ -5,7 +5,7 @@ import { EditorState, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { useEffect, useMemo, useRef } from 'react'
 import type { DraftContents, DraftExtension } from '../../shared/types.js'
-import { createNote, deleteNote, updateNote } from '../api.js'
+import { addReply, createNote, deleteNote, resolveNote, updateNote } from '../api.js'
 import { notes, setNotes, type NoteHandlers } from '../notes/index.js'
 import { closeComposer, setEditing } from '../notes/state.js'
 
@@ -50,6 +50,14 @@ export function DraftPane({ draft, onNotesChanged }: DraftPaneProps) {
       },
       async remove(id) {
         await deleteNote(id)
+        await latest.current.onNotesChanged()
+      },
+      async reply(id, body) {
+        await addReply(id, body)
+        await latest.current.onNotesChanged()
+      },
+      async resolve(id) {
+        await resolveNote(id)
         await latest.current.onNotesChanged()
       },
     }),
