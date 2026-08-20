@@ -61,18 +61,35 @@ and is meant to be read and acted on by a coding agent.
 
 ## What's here
 
-- \`notes.json\` — every **Note** a reviewer has left, for every **Draft** in
-  this folder.
+- \`notes.json\` — every **Note** a reviewer has left: on a passage of a
+  **Draft**, on a whole Draft, or on this folder as a whole.
+
+## How far a Note reaches
+
+A Note is not always about one passage. How far it reaches is derived from what
+it has — there is no \`scope\` field to read:
+
+| \`draftPath\` | \`anchor\` | What it is about |
+| --- | --- | --- |
+| set | set | That exact passage of that Draft. |
+| set | absent | That whole Draft, not any one passage of it. |
+| absent | absent | **The whole folder.** Apply it to *every* Draft here, not to one. |
+
+The last row is the one that is easy to get wrong. A Note with no \`draftPath\`
+— "stop using em dashes", "every file needs a summary section" — is a standing
+instruction for the entire Review. Working through it means visiting every
+Draft in this folder and applying it to each, then leaving a single Reply on
+that one Note saying what you did across all of them.
 
 ## How to act on it
 
-Read \`notes.json\` and work on every Note whose \`status\` is not \`resolved\`.
-Each Note tells you which Draft it is about and exactly which text it is about:
+Read \`notes.json\` and work on every Note whose \`status\` is not \`resolved\`:
 
 | Field | Meaning |
 | --- | --- |
 | \`id\` | Stable identifier. Never change it. |
-| \`draftPath\` | The Draft this Note is about, relative to this folder's parent. |
+| \`draftPath\` | The Draft this Note is about, relative to this folder's parent. Absent when the Note is about the whole folder. |
+| \`anchor\` | Absent when the Note is about a whole Draft or the whole folder. There is then nothing to locate — the Note is about all of it. |
 | \`anchor.text\` | The exact text the Note is about. **This is what locates the Note** — search for it in the Draft. |
 | \`anchor.before\` / \`anchor.after\` | The text either side of the anchor, for telling repeated passages apart. |
 | \`anchor.startLine\` / \`anchor.endLine\` | Where the anchor was when the Note was written. A hint for you as a human reader — it goes stale as soon as the Draft changes, so do not rely on it. |

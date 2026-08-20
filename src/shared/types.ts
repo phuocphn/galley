@@ -23,6 +23,11 @@ export interface ReviewListing {
   /** The Review root's own folder name. */
   name: string
   drafts: DraftSummary[]
+  /**
+   * Notes about the whole Review. They belong to no Draft, so they travel with
+   * the listing and are shown in the sidebar rather than inside any one Draft.
+   */
+  reviewNotes: Note[]
 }
 
 /** A single Draft's contents, with its Notes located in the current text. */
@@ -90,9 +95,13 @@ export interface Reply {
 /** One piece of guidance a reviewer attached to a Draft. */
 export interface Note {
   id: string
-  /** Path of the Draft this Note is on, relative to the Review root. */
-  draftPath: string
-  anchor: Anchor
+  /**
+   * Path of the Draft this Note is on, relative to the Review root. Absent on a
+   * Review-Scope Note, which is about the folder rather than any one Draft.
+   */
+  draftPath?: string
+  /** Absent on a Note about a whole Draft or the whole Review — see `scopeOf`. */
+  anchor?: Anchor
   /** Markdown. */
   body: string
   /** What this Note asks the agent to do. */
@@ -109,9 +118,11 @@ export interface ResolvedNote extends Note {
   range: { from: number; to: number } | null
   /**
    * How the Anchor was found. `reworded` means the passage changed but stayed
-   * recognisable, which is worth showing the reviewer.
+   * recognisable, which is worth showing the reviewer. `unanchored` means the
+   * Note never had an Anchor — it is about the whole Draft — which is a
+   * different thing from `orphaned`, where the text it was about is gone.
    */
-  match: 'exact' | 'reworded' | 'orphaned'
+  match: 'exact' | 'reworded' | 'orphaned' | 'unanchored'
 }
 
 /** What the client sends to re-attach an Orphaned Note to new text. */
@@ -120,12 +131,16 @@ export interface Reanchor {
   to: number
 }
 
-/** What the client sends to attach a new Note. */
+/**
+ * What the client sends to attach a new Note. What is left out is what sets the
+ * Scope: omit `from`/`to` for a Draft-Scope Note, omit `draftPath` too for a
+ * Review-Scope one.
+ */
 export interface NewNote {
-  draftPath: string
+  draftPath?: string
   /** Character offsets into the Draft as the client currently has it. */
-  from: number
-  to: number
+  from?: number
+  to?: number
   body: string
   /** Omitted means Fix. */
   kind?: NoteKind

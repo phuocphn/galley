@@ -183,12 +183,12 @@ describe('the orphaned flag in the sidecar', () => {
   it('is written back so the agent can see the Note came loose', async () => {
     fixture = await createReviewFixture({ 'findings.md': ORIGINAL })
     await noteOnPhrase(fixture, PHRASE)
-    expect((await readSidecar(fixture)).notes[0]!.anchor.orphaned).toBeUndefined()
+    expect((await readSidecar(fixture)).notes[0]!.anchor!.orphaned).toBeUndefined()
 
     await fixture.write('findings.md', '# Findings\n\nAll rewritten.\n')
     await readDraft(fixture)
 
-    expect((await readSidecar(fixture)).notes[0]!.anchor.orphaned).toBe(true)
+    expect((await readSidecar(fixture)).notes[0]!.anchor!.orphaned).toBe(true)
   })
 
   it('is cleared again if the passage comes back', async () => {
@@ -197,12 +197,12 @@ describe('the orphaned flag in the sidecar', () => {
 
     await fixture.write('findings.md', '# Findings\n\nAll rewritten.\n')
     await readDraft(fixture)
-    expect((await readSidecar(fixture)).notes[0]!.anchor.orphaned).toBe(true)
+    expect((await readSidecar(fixture)).notes[0]!.anchor!.orphaned).toBe(true)
 
     await fixture.write('findings.md', ORIGINAL)
     await readDraft(fixture)
 
-    expect((await readSidecar(fixture)).notes[0]!.anchor.orphaned).toBe(false)
+    expect((await readSidecar(fixture)).notes[0]!.anchor!.orphaned).toBe(false)
   })
 
   it('leaves the Note outstanding rather than quietly resolving it', async () => {
@@ -233,8 +233,8 @@ describe('re-attaching an Orphaned Note', () => {
       body: JSON.stringify({ from, to: from + 'a softer claim'.length }),
     })
 
-    expect(reattached.anchor.text).toBe('a softer claim')
-    expect(reattached.anchor.orphaned).toBeFalsy()
+    expect(reattached.anchor!.text).toBe('a softer claim')
+    expect(reattached.anchor!.orphaned).toBeFalsy()
     expect(reattached.body).toBe('This claim is unsourced.')
 
     const draft = await readDraft(fixture)

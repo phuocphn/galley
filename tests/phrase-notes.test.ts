@@ -67,13 +67,13 @@ describe('anchoring a Note to a phrase', () => {
 
     const note = await noteOnPhrase(fixture, 'findings.md', DRAFT, PHRASE, 'Unsourced claim.')
 
-    expect(note.anchor.text).toBe(PHRASE)
+    expect(note.anchor!.text).toBe(PHRASE)
     // Same line at both ends, and far shorter than that line.
-    expect(note.anchor.startLine).toBe(3)
-    expect(note.anchor.endLine).toBe(3)
+    expect(note.anchor!.startLine).toBe(3)
+    expect(note.anchor!.endLine).toBe(3)
     const line = DRAFT.split('\n')[2]!
-    expect(note.anchor.text.length).toBeLessThan(line.length)
-    expect(line).toContain(note.anchor.text)
+    expect(note.anchor!.text.length).toBeLessThan(line.length)
+    expect(line).toContain(note.anchor!.text)
   })
 
   it('re-finds the phrase after the Draft is reloaded', async () => {
@@ -106,7 +106,7 @@ describe('anchoring a Note to a phrase', () => {
     expect(textAt(draft, first!)).toBe(corpus)
     expect(textAt(draft, second!)).toBe(PHRASE)
     // Both on line 3, and not overlapping each other.
-    expect([first!.anchor.startLine, second!.anchor.startLine]).toEqual([3, 3])
+    expect([first!.anchor!.startLine, second!.anchor!.startLine]).toEqual([3, 3])
     expect(first!.range!.to).toBeLessThan(second!.range!.from)
   })
 
@@ -131,8 +131,8 @@ describe('anchoring a Note to a phrase', () => {
       'Repeated verbatim from Findings.',
       { occurrence: 1 },
     )
-    expect(inFindings.anchor.startLine).toBe(3)
-    expect(inMethod.anchor.startLine).toBe(7)
+    expect(inFindings.anchor!.startLine).toBe(3)
+    expect(inMethod.anchor!.startLine).toBe(7)
 
     const draft = await reload(fixture, 'findings.md')
     const found = Object.fromEntries(
