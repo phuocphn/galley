@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { scopeOf } from '../shared/scope.js'
 import type { Note, NoteKind } from '../shared/types.js'
 import { countByKind } from './kind.js'
 import { NOTES_FILE, SIDECAR_DIRECTORY } from './sidecar.js'
@@ -18,7 +19,8 @@ export function handoffInstruction(reviewRoot: string, notes: Note[]): string {
   const answered = outstanding.filter((note) => statusOf(note) === 'answered')
 
   const sidecar = `${path.basename(reviewRoot)}/${SIDECAR_DIRECTORY}/${NOTES_FILE}`
-  const drafts = [...new Set(outstanding.map((note) => note.draftPath))]
+  const drafts = [...new Set(outstanding.map((note) => note.draftPath).filter(Boolean))]
+  const reviewScoped = outstanding.filter((note) => scopeOf(note) === 'review')
 
   if (notes.length === 0) {
     return `No Notes have been left on this Review yet, so there is nothing to hand off.`
@@ -43,10 +45,16 @@ export function handoffInstruction(reviewRoot: string, notes: Note[]): string {
     'How to work through it:',
     '',
     `1. Read \`${sidecar}\`. Work on every Note whose \`status\` is not \`resolved\`.`,
-    '2. Locate each Note by its `anchor.text` — search the Draft for that exact text.',
-    '   `anchor.before` and `anchor.after` tell repeated passages apart. The line',
-    '   numbers are only a hint and go stale as soon as the Draft changes, so do not',
-    '   rely on them.',
+    '2. How far a Note reaches is told by what it has — there is no `scope` field:',
+    '   - **`draftPath` and `anchor`** — it is about that passage of that Draft.',
+    '     Locate it by its `anchor.text`: search the Draft for that exact text.',
+    '     `anchor.before` and `anchor.after` tell repeated passages apart. The line',
+    '     numbers are only a hint and go stale as soon as the Draft changes, so do',
+    '     not rely on them.',
+    '   - **`draftPath`, no `anchor`** — it is about that whole Draft, not any one',
+    '     passage of it.',
+    '   - **neither** — it is about the whole Review. Apply it to **every** Draft in',
+    '     the folder, not just to one of them.',
     '3. For every Note you act on, append to its `replies` array:',
     '',
     '   ```json',
@@ -60,11 +68,28 @@ export function handoffInstruction(reviewRoot: string, notes: Note[]): string {
     '   change, and write it back — the reviewer may be adding Notes at the same',
     '   moment, and merging by `id` is what keeps both sides\' work.',
     '',
-    `The Drafts with outstanding feedback: ${drafts.map((draft) => `\`${draft}\``).join(', ')}.`,
-    '',
+  ]
+
+  if (drafts.length > 0) {
+    lines.push(
+      `The Drafts with outstanding feedback: ${drafts.map((draft) => `\`${draft}\``).join(', ')}.`,
+      '',
+    )
+  }
+  if (reviewScoped.length > 0) {
+    const one = reviewScoped.length === 1
+    lines.push(
+      `${count(reviewScoped.length, 'Note')} ${one ? 'has' : 'have'} no \`draftPath\` at all.`,
+      `${one ? 'It applies' : 'They apply'} to the whole Review: apply ${one ? 'it' : 'each of them'}`,
+      'to every Draft in the folder, not only to the ones named above.',
+      '',
+    )
+  }
+
+  lines.push(
     'The reviewer may also have edited these Drafts by hand. Treat the current',
     'content as intentional and change only what the Notes ask for.',
-  ]
+  )
 
   return lines.join('\n')
 }

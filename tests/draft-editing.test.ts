@@ -259,7 +259,7 @@ describe('a Note’s Anchor after the reviewer edits the Draft', () => {
     expect(saved.notes[0]!.status).toBe('open')
 
     const sidecar = JSON.parse((await fixture.read('.feedback/notes.json'))!) as Sidecar
-    expect(sidecar.notes[0]!.anchor.orphaned).toBe(true)
+    expect(sidecar.notes[0]!.anchor!.orphaned).toBe(true)
   })
 
   it('leaves a Note anchored to text the reviewer did not touch', async () => {

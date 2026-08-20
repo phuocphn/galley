@@ -1,7 +1,10 @@
-import type { ResolvedNote } from '../../shared/types.js'
+import type { Anchor, ResolvedNote } from '../../shared/types.js'
+
+/** Losing an Anchor is what orphans a Note, so an Orphaned one always had one. */
+export type OrphanedNote = ResolvedNote & { anchor: Anchor }
 
 interface OrphanedNotesProps {
-  notes: ResolvedNote[]
+  notes: OrphanedNote[]
   /** The Note currently waiting for the reviewer to pick new text, if any. */
   reattaching: string | undefined
   onReattach: (id: string) => void

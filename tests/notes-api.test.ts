@@ -62,11 +62,11 @@ describe('attaching a Note', () => {
 
     const note = await noteOn(fixture, 'notes.md', DRAFT, 'three things', 'Which three?')
 
-    expect(note.anchor.text).toBe('three things')
-    expect(note.anchor.before).toContain('We shipped ')
-    expect(note.anchor.after).toContain(' this week')
-    expect(note.anchor.startLine).toBe(3)
-    expect(note.anchor.endLine).toBe(3)
+    expect(note.anchor!.text).toBe('three things')
+    expect(note.anchor!.before).toContain('We shipped ')
+    expect(note.anchor!.after).toContain(' this week')
+    expect(note.anchor!.startLine).toBe(3)
+    expect(note.anchor!.endLine).toBe(3)
   })
 
   it('records the Note as open, on its Draft, with timestamps', async () => {
@@ -107,8 +107,8 @@ describe('attaching a Note', () => {
       'This section is filler. Cut it or fill it in.',
     )
 
-    expect(note.anchor.startLine).toBe(5)
-    expect(note.anchor.endLine).toBe(7)
+    expect(note.anchor!.startLine).toBe(5)
+    expect(note.anchor!.endLine).toBe(7)
   })
 
   it('writes the sidecar and its README into .feedback/', async () => {
@@ -375,7 +375,7 @@ describe('re-finding a Note after the Draft changes', () => {
     expect(note!.range).not.toBeNull()
     expect(draft.content.slice(note!.range!.from, note!.range!.to)).toBe('three things')
     // The stored line hint is now stale, which is exactly why it isn't used.
-    expect(note!.anchor.startLine).toBe(3)
+    expect(note!.anchor!.startLine).toBe(3)
     expect(note!.range!.from).toBeGreaterThan(rewritten.indexOf('# Release notes'))
   })
 

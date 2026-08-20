@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { Hono } from 'hono'
+import { scopeOf } from '../shared/scope.js'
 import type {
+  Anchor,
   DraftContents,
   Handoff,
   NewNote,
@@ -22,6 +24,11 @@ import { normalised, statusOf } from './status.js'
 /** Attach each Note to the Draft as it stands right now. */
 function resolveNotes(notes: Note[], content: string): ResolvedNote[] {
   return notes.map((note) => {
+    // A Draft-Scope Note has no Anchor to look for. It reports `unanchored`
+    // rather than `orphaned`: nothing has been lost, it was never about a
+    // particular passage.
+    if (!note.anchor) return { ...normalised(note), range: null, match: 'unanchored' }
+
     const located = locateAnchor(content, note.anchor)
     return {
       ...normalised(note),
@@ -45,18 +52,24 @@ async function recordOrphans(
   stored: Note[],
   resolved: ResolvedNote[],
 ): Promise<void> {
-  const nowOrphaned = new Map(resolved.map((note) => [note.id, note.range === null]))
+  // Only Notes with an Anchor can lose one. A Draft-Scope Note is left out of
+  // the map entirely, so neither the check nor the rewrite below touches it.
+  const nowOrphaned = new Map(
+    resolved.filter((note) => note.anchor).map((note) => [note.id, note.range === null]),
+  )
 
   const changed = stored.some((note) => {
     const orphaned = nowOrphaned.get(note.id)
-    return orphaned !== undefined && Boolean(note.anchor.orphaned) !== orphaned
+    return orphaned !== undefined && Boolean(note.anchor?.orphaned) !== orphaned
   })
   if (!changed) return
 
   await mutateNotes(reviewRoot, (notes) =>
     notes.map((note) => {
       const orphaned = nowOrphaned.get(note.id)
-      if (orphaned === undefined || Boolean(note.anchor.orphaned) === orphaned) return note
+      if (orphaned === undefined || !note.anchor || Boolean(note.anchor.orphaned) === orphaned) {
+        return note
+      }
       return { ...note, anchor: { ...note.anchor, orphaned } }
     }),
   )
@@ -106,6 +119,9 @@ export function createReviewApp(reviewRoot: string): Hono {
           answeredNoteCount: own.filter((note) => statusOf(note) === 'answered').length,
         }
       }),
+      // Review-Scope Notes are on no Draft, so no Draft's count can carry them.
+      // They travel with the listing and are counted in the sidebar instead.
+      reviewNotes: notes.filter((note) => scopeOf(note) === 'review').map(normalised),
     }
     return c.json(listing)
   })
@@ -165,26 +181,43 @@ export function createReviewApp(reviewRoot: string): Hono {
     const submitted = (await c.req.json().catch(() => undefined)) as Partial<NewNote> | undefined
     if (!submitted) return c.json({ error: 'Expected a JSON body' }, 400)
 
+    // What is left out decides the Scope: a range makes it a range Note, a
+    // Draft path alone makes it a Draft Note, neither makes it a Review Note.
+    // Left out is not the same as malformed, so a half-given range is refused
+    // rather than quietly widened into a Draft Note.
     const { draftPath, from, to, body } = submitted
-    if (typeof draftPath !== 'string' || typeof from !== 'number' || typeof to !== 'number') {
-      return c.json({ error: 'A Note needs a draftPath and a from/to range' }, 400)
-    }
     if (typeof body !== 'string' || body.trim() === '') {
       return c.json({ error: 'A Note needs something to say' }, 400)
     }
+    if (draftPath !== undefined && typeof draftPath !== 'string') {
+      return c.json({ error: 'A draftPath has to be a path, or left out entirely' }, 400)
+    }
+    const ranged = from !== undefined || to !== undefined
+    if (ranged && (typeof from !== 'number' || typeof to !== 'number')) {
+      return c.json({ error: 'A Note on a range of a Draft needs both from and to' }, 400)
+    }
+    if (ranged && draftPath === undefined) {
+      return c.json({ error: 'A Note on a range needs the Draft the range is in' }, 400)
+    }
 
-    const draft = await readDraft(root, draftPath)
-    if (!draft) return c.json({ error: `No such Draft in this Review: ${draftPath}` }, 404)
+    let anchor: Anchor | undefined
+    if (draftPath !== undefined) {
+      const draft = await readDraft(root, draftPath)
+      if (!draft) return c.json({ error: `No such Draft in this Review: ${draftPath}` }, 404)
 
-    if (from < 0 || to > draft.content.length || from >= to) {
-      return c.json({ error: 'That range is not in the Draft' }, 400)
+      if (ranged) {
+        if (from! < 0 || to! > draft.content.length || from! >= to!) {
+          return c.json({ error: 'That range is not in the Draft' }, 400)
+        }
+        anchor = captureAnchor(draft.content, from!, to!)
+      }
     }
 
     const now = new Date().toISOString()
     const note: Note = {
       id: randomUUID(),
-      draftPath,
-      anchor: captureAnchor(draft.content, from, to),
+      ...(draftPath === undefined ? {} : { draftPath }),
+      ...(anchor === undefined ? {} : { anchor }),
       body: body.trim(),
       // An unrecognised Kind is treated as unsaid rather than refused: the
       // sidecar is a file anything can write, and Fix is the safe reading.
@@ -265,6 +298,10 @@ export function createReviewApp(reviewRoot: string): Hono {
 
     const existing = (await readNotes(root)).find((note) => note.id === id)
     if (!existing) return c.json({ error: `No such Note: ${id}` }, 404)
+    // Only a Note that was about a passage can be pointed at a new one.
+    if (!existing.draftPath || !existing.anchor) {
+      return c.json({ error: 'That Note is not about a passage, so it cannot be re-attached' }, 400)
+    }
 
     const draft = await readDraft(root, existing.draftPath)
     if (!draft) return c.json({ error: `No such Draft: ${existing.draftPath}` }, 404)
