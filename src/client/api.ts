@@ -3,6 +3,7 @@ import type {
   Handoff,
   NewNote,
   Note,
+  Reanchor,
   ReplyAuthor,
   ReviewListing,
 } from '../shared/types.js'
@@ -42,6 +43,10 @@ export function deleteNote(id: string): Promise<void> {
 
 export function addReply(id: string, body: string, author: ReplyAuthor = 'reviewer'): Promise<Note> {
   return send<Note>(`/api/notes/${id}/replies`, asJson('POST', { body, author }))
+}
+
+export function reanchorNote(id: string, range: Reanchor): Promise<Note> {
+  return send<Note>(`/api/notes/${id}/reanchor`, asJson('POST', range))
 }
 
 export function resolveNote(id: string): Promise<Note> {

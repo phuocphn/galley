@@ -6,6 +6,7 @@ import type {
   Handoff,
   NewNote,
   Note,
+  Reanchor,
   Reply,
   ReplyAuthor,
   ResolvedNote,
@@ -19,10 +20,45 @@ import { normalised, statusOf } from './status.js'
 
 /** Attach each Note to the Draft as it stands right now. */
 function resolveNotes(notes: Note[], content: string): ResolvedNote[] {
-  return notes.map((note) => ({
-    ...normalised(note),
-    range: locateAnchor(content, note.anchor) ?? null,
-  }))
+  return notes.map((note) => {
+    const located = locateAnchor(content, note.anchor)
+    return {
+      ...normalised(note),
+      anchor: { ...note.anchor, orphaned: located === undefined },
+      range: located ? { from: located.from, to: located.to } : null,
+      match: located?.match ?? 'orphaned',
+    }
+  })
+}
+
+/**
+ * Record in the sidecar which Notes have lost their Anchor.
+ *
+ * Reading is what discovers this — the agent rewrites a Draft and the Note only
+ * comes loose next time someone looks. Writing the flag back keeps the file
+ * honest for the agent reading it, and the write is skipped unless something
+ * actually changed, so a read stays a read in the normal case.
+ */
+async function recordOrphans(
+  reviewRoot: string,
+  stored: Note[],
+  resolved: ResolvedNote[],
+): Promise<void> {
+  const nowOrphaned = new Map(resolved.map((note) => [note.id, note.range === null]))
+
+  const changed = stored.some((note) => {
+    const orphaned = nowOrphaned.get(note.id)
+    return orphaned !== undefined && Boolean(note.anchor.orphaned) !== orphaned
+  })
+  if (!changed) return
+
+  await mutateNotes(reviewRoot, (notes) =>
+    notes.map((note) => {
+      const orphaned = nowOrphaned.get(note.id)
+      if (orphaned === undefined || Boolean(note.anchor.orphaned) === orphaned) return note
+      return { ...note, anchor: { ...note.anchor, orphaned } }
+    }),
+  )
 }
 
 /**
@@ -84,12 +120,10 @@ export function createReviewApp(reviewRoot: string): Hono {
     if (!draft) return c.json({ error: `No such Draft in this Review: ${draftPath}` }, 404)
 
     const notes = (await readNotes(root)).filter((note) => note.draftPath === draftPath)
+    const resolved = resolveNotes(notes, draft.content)
+    await recordOrphans(root, notes, resolved)
 
-    const contents: DraftContents = {
-      path: draftPath,
-      ...draft,
-      notes: resolveNotes(notes, draft.content),
-    }
+    const contents: DraftContents = { path: draftPath, ...draft, notes: resolved }
     return c.json(contents)
   })
 
@@ -172,6 +206,36 @@ export function createReviewApp(reviewRoot: string): Hono {
 
     if (!updated) return c.json({ error: `No such Note: ${id}` }, 404)
     return c.json(updated, 201)
+  })
+
+  app.post('/api/notes/:id/reanchor', async (c) => {
+    const id = c.req.param('id')
+    const submitted = (await c.req.json().catch(() => undefined)) as
+      | Partial<Reanchor>
+      | undefined
+
+    if (typeof submitted?.from !== 'number' || typeof submitted.to !== 'number') {
+      return c.json({ error: 'Re-attaching a Note needs a from/to range' }, 400)
+    }
+
+    const existing = (await readNotes(root)).find((note) => note.id === id)
+    if (!existing) return c.json({ error: `No such Note: ${id}` }, 404)
+
+    const draft = await readDraft(root, existing.draftPath)
+    if (!draft) return c.json({ error: `No such Draft: ${existing.draftPath}` }, 404)
+
+    const { from, to } = submitted
+    if (from < 0 || to > draft.content.length || from >= to) {
+      return c.json({ error: 'That range is not in the Draft' }, 400)
+    }
+
+    // A fresh Anchor, so the Note is no longer orphaned by construction.
+    const updated = await changeNote(root, id, (note) => ({
+      ...note,
+      anchor: captureAnchor(draft.content, from, to),
+    }))
+
+    return c.json(updated!)
   })
 
   app.post('/api/notes/:id/resolve', async (c) => {

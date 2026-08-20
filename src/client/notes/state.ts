@@ -22,6 +22,12 @@ export const toggleCollapsed = StateEffect.define<string>()
 /** Put one Note's thread into edit mode, or take it out. */
 export const setEditing = StateEffect.define<string | null>()
 
+/**
+ * The Orphaned Note the reviewer is re-attaching, if any. While this is set,
+ * choosing a range points that Note at new text instead of starting a new one.
+ */
+export const setReattaching = StateEffect.define<string | null>()
+
 export const notesField = StateField.define<ResolvedNote[]>({
   create: () => [],
   update(notes, transaction) {
@@ -77,6 +83,14 @@ export const editingField = StateField.define<string | null>({
   update(editing, transaction) {
     for (const effect of transaction.effects) if (effect.is(setEditing)) return effect.value
     return editing
+  },
+})
+
+export const reattachingField = StateField.define<string | null>({
+  create: () => null,
+  update(reattaching, transaction) {
+    for (const effect of transaction.effects) if (effect.is(setReattaching)) return effect.value
+    return reattaching
   },
 })
 

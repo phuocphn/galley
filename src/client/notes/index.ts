@@ -9,6 +9,7 @@ import {
   editingField,
   hoveredLineField,
   notesField,
+  reattachingField,
 } from './state.js'
 import { ComposerWidget, ThreadWidget, type NoteHandlers } from './widgets.js'
 
@@ -116,9 +117,10 @@ export function notes(handlers: NoteHandlers): Extension {
     draggedLinesField,
     collapsedField,
     editingField,
+    reattachingField,
     decorations,
     anchorTheme,
-    noteGutter(),
-    selectionNoteButton(),
+    noteGutter(handlers),
+    selectionNoteButton(handlers),
   ]
 }

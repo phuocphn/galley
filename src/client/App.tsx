@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DraftContents, ReviewListing } from '../shared/types.js'
-import { fetchDraft, fetchHandoff, fetchReview } from './api.js'
+import { deleteNote, fetchDraft, fetchHandoff, fetchReview, resolveNote } from './api.js'
 import { DraftPane } from './components/DraftPane.js'
 import { FileTree } from './components/FileTree.js'
 import { HandoffButton } from './components/HandoffButton.js'
+import { OrphanedNotes } from './components/OrphanedNotes.js'
 import { useReviewEvents } from './useReviewEvents.js'
 
 export function App() {
@@ -11,6 +12,7 @@ export function App() {
   const [selectedPath, setSelectedPath] = useState<string>()
   const [draft, setDraft] = useState<DraftContents>()
   const [showResolved, setShowResolved] = useState(false)
+  const [reattaching, setReattaching] = useState<string>()
   const [error, setError] = useState<string>()
 
   const selected = useRef<string>(undefined)
@@ -36,6 +38,7 @@ export function App() {
       .catch((cause: Error) => {
         if (current) setError(cause.message)
       })
+    setReattaching(undefined)
     return () => {
       current = false
     }
@@ -98,7 +101,7 @@ export function App() {
   const open = review.drafts.reduce((total, item) => total + item.openNoteCount, 0)
   const answered = review.drafts.reduce((total, item) => total + item.answeredNoteCount, 0)
   const resolvedHere = draft?.notes.filter((note) => note.status === 'resolved').length ?? 0
-  const unplaced = visibleDraft?.notes.filter((note) => note.range === null).length ?? 0
+  const orphaned = visibleDraft?.notes.filter((note) => note.range === null) ?? []
 
   return (
     <div className="flex h-full flex-col">
@@ -138,15 +141,22 @@ export function App() {
                   </label>
                 )}
               </div>
-              {unplaced > 0 && (
-                <p className="shrink-0 border-b border-[#d4a72c66] bg-[#fff8c5] px-4 py-2 text-[12px]">
-                  {unplaced} {unplaced === 1 ? 'Note' : 'Notes'} could not be found in this Draft
-                  any more.
-                </p>
-              )}
+              <OrphanedNotes
+                notes={orphaned}
+                reattaching={reattaching}
+                onReattach={setReattaching}
+                onCancelReattach={() => setReattaching(undefined)}
+                onResolve={(id) => void resolveNote(id).then(refresh)}
+                onDelete={(id) => void deleteNote(id).then(refresh)}
+              />
               <div className="min-h-0 flex-1">
                 {visibleDraft ? (
-                  <DraftPane draft={visibleDraft} onNotesChanged={refresh} />
+                  <DraftPane
+                    draft={visibleDraft}
+                    reattaching={reattaching}
+                    onNotesChanged={refresh}
+                    onReattached={() => setReattaching(undefined)}
+                  />
                 ) : (
                   <p className="p-4 text-[13px] text-[var(--review-dim)]">Loading Draft…</p>
                 )}
