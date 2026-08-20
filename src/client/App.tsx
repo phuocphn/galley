@@ -14,6 +14,8 @@ import { FileTree } from './components/FileTree.js'
 import { HandoffButton } from './components/HandoffButton.js'
 import { OrphanedNotes, type OrphanedNote } from './components/OrphanedNotes.js'
 import { ScopedNotes } from './components/ScopedNotes.js'
+import { SidebarToggle } from './components/SidebarToggle.js'
+import { useCollapsibleSidebar } from './useCollapsibleSidebar.js'
 import { useReviewEvents } from './useReviewEvents.js'
 
 export function App() {
@@ -23,6 +25,7 @@ export function App() {
   const [showResolved, setShowResolved] = useState(false)
   const [reattaching, setReattaching] = useState<string>()
   const [error, setError] = useState<string>()
+  const sidebar = useCollapsibleSidebar()
 
   const selected = useRef<string>(undefined)
   selected.current = selectedPath
@@ -131,6 +134,9 @@ export function App() {
     review.drafts.reduce((total, item) => total + item.openNoteCount, 0) + inReview('open')
   const answered =
     review.drafts.reduce((total, item) => total + item.answeredNoteCount, 0) + inReview('answered')
+  // Notes on the whole Review are only reachable from the sidebar, so the toggle
+  // carries their count while it is hidden.
+  const outstandingReviewNotes = inReview('open') + inReview('answered')
 
   // Draft-Scope Notes carry their own toggle, in their own section.
   const resolvedHere =
@@ -144,6 +150,11 @@ export function App() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex shrink-0 items-center gap-3 border-b border-[var(--review-border)] px-4 py-2">
+        <SidebarToggle
+          collapsed={sidebar.collapsed}
+          hiddenReviewNotes={outstandingReviewNotes}
+          onToggle={sidebar.toggle}
+        />
         <h1 className="text-[14px] font-semibold">{review.name}</h1>
         <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--review-dim)]">
           {review.root}
@@ -157,7 +168,9 @@ export function App() {
 
       <div className="flex min-h-0 flex-1">
         <nav
+          id="review-sidebar"
           aria-label="Drafts"
+          hidden={sidebar.collapsed}
           className="w-72 shrink-0 overflow-y-auto border-r border-[var(--review-border)] bg-[var(--review-muted)]"
         >
           <FileTree drafts={review.drafts} selectedPath={selectedPath} onSelect={setSelectedPath} />
