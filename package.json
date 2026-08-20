@@ -33,6 +33,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@codemirror/commands": "^6.11.0",
     "@codemirror/lang-html": "^6.4.9",
     "@codemirror/lang-markdown": "^6.3.1",
     "@codemirror/language": "^6.12.4",

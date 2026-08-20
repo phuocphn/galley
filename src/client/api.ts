@@ -29,6 +29,18 @@ export function fetchDraft(draftPath: string): Promise<DraftContents> {
   return send<DraftContents>(`/api/draft?${new URLSearchParams({ path: draftPath })}`)
 }
 
+/**
+ * Write a Draft back to disk. The whole buffer goes, because the buffer is what
+ * the reviewer means the file to say — see `docs/adr/0003`. The response is the
+ * Draft as the server now reads it, with its Notes re-located in the new text.
+ */
+export function saveDraft(draftPath: string, content: string): Promise<DraftContents> {
+  return send<DraftContents>(
+    `/api/draft?${new URLSearchParams({ path: draftPath })}`,
+    asJson('PUT', { content }),
+  )
+}
+
 export function createNote(note: NewNote): Promise<Note> {
   return send<Note>('/api/notes', asJson('POST', note))
 }

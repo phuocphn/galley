@@ -13,7 +13,7 @@ import {
 } from './state.js'
 import { ComposerWidget, ThreadWidget, type NoteHandlers } from './widgets.js'
 
-export { setNotes } from './state.js'
+export { keepingLocalAnchors, notesField, setNotes } from './state.js'
 export type { NoteHandlers } from './widgets.js'
 
 /**

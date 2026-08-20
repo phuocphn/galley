@@ -14,7 +14,7 @@ import type {
 } from '../shared/types.js'
 import { captureAnchor, locateAnchor } from './anchor.js'
 import { handoffInstruction } from './handoff.js'
-import { listDrafts, readDraft } from './review.js'
+import { listDrafts, readDraft, writeDraft } from './review.js'
 import { mutateNotes, readNotes } from './sidecar.js'
 import { normalised, statusOf } from './status.js'
 
@@ -124,6 +124,39 @@ export function createReviewApp(reviewRoot: string): Hono {
     await recordOrphans(root, notes, resolved)
 
     const contents: DraftContents = { path: draftPath, ...draft, notes: resolved }
+    return c.json(contents)
+  })
+
+  // Writing a Draft back. The Draft pane is a real editor and the file on disk
+  // is authoritative (`docs/adr/0003`), so the reviewer's autosave lands here.
+  // The whole Draft is sent, not a patch: the buffer is what the reviewer means
+  // the file to say, and a whole-file write is the same shape the agent uses.
+  app.put('/api/draft', async (c) => {
+    const draftPath = c.req.query('path')
+    if (!draftPath) return c.json({ error: 'Ask for a Draft by path' }, 400)
+
+    const submitted = (await c.req.json().catch(() => undefined)) as
+      | { content?: unknown }
+      | undefined
+    if (typeof submitted?.content !== 'string') {
+      return c.json({ error: 'A Draft is written with its full content' }, 400)
+    }
+
+    const written = await writeDraft(root, draftPath, submitted.content)
+    if (!written) return c.json({ error: `No such Draft in this Review: ${draftPath}` }, 404)
+
+    // Same bookkeeping a read does: the reviewer can edit an anchored passage
+    // away just as the agent can, and the sidecar should say so.
+    const notes = (await readNotes(root)).filter((note) => note.draftPath === draftPath)
+    const resolved = resolveNotes(notes, submitted.content)
+    await recordOrphans(root, notes, resolved)
+
+    const contents: DraftContents = {
+      path: draftPath,
+      extension: written.extension,
+      content: submitted.content,
+      notes: resolved,
+    }
     return c.json(contents)
   })
 
