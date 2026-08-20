@@ -288,3 +288,78 @@ body {
   background: none;
   color: var(--review-dim);
 }
+
+/* Status and replies inside a thread. */
+.cm-noteStatus {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.cm-noteStatus--open {
+  border-color: #1f883d55;
+  background: #dafbe1;
+  color: #1a7f37;
+}
+
+.cm-noteStatus--answered {
+  border-color: #8250df55;
+  background: #fbefff;
+  color: #8250df;
+}
+
+.cm-noteStatus--resolved {
+  border-color: var(--review-border);
+  background: var(--review-muted);
+  color: var(--review-dim);
+}
+
+.cm-noteThread--resolved {
+  opacity: 0.72;
+}
+
+.cm-noteReplyCount {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--review-dim);
+}
+
+.cm-noteReply {
+  border-top: 1px solid var(--review-border);
+}
+
+.cm-noteReply--agent {
+  background: #fbefff44;
+}
+
+.cm-noteReplyHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px 0;
+  font-size: 11px;
+}
+
+.cm-noteReplyAuthor {
+  font-weight: 600;
+}
+
+.cm-noteReplyWhen {
+  color: var(--review-dim);
+}
+
+.cm-noteReply .cm-noteBody {
+  padding-top: 4px;
+}
+
+.cm-noteEditor--reply {
+  border-top: 1px solid var(--review-border);
+  background: var(--review-muted);
+}
+
+.cm-noteEditor--reply .cm-noteTextarea {
+  background: var(--review-surface);
+}

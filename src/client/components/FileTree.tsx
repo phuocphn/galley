@@ -13,6 +13,7 @@ interface DraftNode {
   name: string
   path: string
   openNoteCount: number
+  answeredNoteCount: number
 }
 
 type TreeNode = FolderNode | DraftNode
@@ -43,6 +44,7 @@ function buildTree(drafts: DraftSummary[]): TreeNode[] {
       name: fileName,
       path: draft.path,
       openNoteCount: draft.openNoteCount,
+      answeredNoteCount: draft.answeredNoteCount,
     })
   }
 
@@ -142,14 +144,24 @@ function TreeItem({ node, depth, selectedPath, onSelect }: TreeItemProps) {
       >
         <DraftIcon />
         <span className="truncate">{node.name}</span>
-        {node.openNoteCount > 0 && (
-          <span
-            className="ml-auto shrink-0 rounded-full bg-[var(--review-accent)] px-1.5 text-[11px] font-semibold text-white"
-            title={`${node.openNoteCount} open ${node.openNoteCount === 1 ? 'Note' : 'Notes'}`}
-          >
-            {node.openNoteCount}
-          </span>
-        )}
+        <span className="ml-auto flex shrink-0 gap-1">
+          {node.answeredNoteCount > 0 && (
+            <span
+              className="rounded-full bg-[#8250df] px-1.5 text-[11px] font-semibold text-white"
+              title={`${node.answeredNoteCount} answered, awaiting your review`}
+            >
+              {node.answeredNoteCount}
+            </span>
+          )}
+          {node.openNoteCount > 0 && (
+            <span
+              className="rounded-full bg-[var(--review-accent)] px-1.5 text-[11px] font-semibold text-white"
+              title={`${node.openNoteCount} open ${node.openNoteCount === 1 ? 'Note' : 'Notes'}`}
+            >
+              {node.openNoteCount}
+            </span>
+          )}
+        </span>
       </button>
     </li>
   )

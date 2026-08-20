@@ -59,8 +59,8 @@ and is meant to be read and acted on by a coding agent.
 
 ## How to act on it
 
-Read \`notes.json\` and address every Note whose \`status\` is \`open\`. Each Note
-tells you which Draft it is about and exactly which text it is about:
+Read \`notes.json\` and work on every Note whose \`status\` is not \`resolved\`.
+Each Note tells you which Draft it is about and exactly which text it is about:
 
 | Field | Meaning |
 | --- | --- |
@@ -70,17 +70,40 @@ tells you which Draft it is about and exactly which text it is about:
 | \`anchor.before\` / \`anchor.after\` | The text either side of the anchor, for telling repeated passages apart. |
 | \`anchor.startLine\` / \`anchor.endLine\` | Where the anchor was when the Note was written. A hint for you as a human reader — it goes stale as soon as the Draft changes, so do not rely on it. |
 | \`body\` | The reviewer's guidance, in Markdown. |
-| \`status\` | \`open\` — still outstanding. |
+| \`status\` | \`open\`, \`answered\`, or \`resolved\`. See below. |
+| \`replies\` | The back-and-forth under the Note, oldest first. |
 | \`createdAt\` / \`updatedAt\` | ISO timestamps. |
 
-The reviewer may also have edited the Drafts by hand. Treat the current content
-as intentional and change only what the Notes ask for.
+## Replying
+
+For every Note you act on, append an entry to its \`replies\` array saying what
+you changed — or why you didn't:
+
+\`\`\`json
+{
+  "id": "<new uuid>",
+  "author": "agent",
+  "body": "Named all three items and dropped the bold.",
+  "createdAt": "2026-01-01T00:00:00.000Z"
+}
+\`\`\`
+
+Then set that Note's \`status\` to \`"answered"\`.
+
+**Do not set \`"resolved"\`.** Accepting the work is the reviewer's call — they
+read the revision and resolve the Note themselves. If they aren't satisfied they
+reply again, which puts the Note back to \`open\`.
+
+A Note that asks you a question wants an answer in a Reply, not an edit.
 
 ## Rules for writing this file
 
 Never rewrite \`notes.json\` wholesale. Read it, change the entries you mean to
 change, and write it back — the reviewer may be adding Notes at the same moment,
 and merging by \`id\` is what keeps both sides' work.
+
+The reviewer may also have edited the Drafts by hand. Treat the current content
+as intentional and change only what the Notes ask for.
 `
 
 async function writeSidecarReadme(reviewRoot: string): Promise<void> {

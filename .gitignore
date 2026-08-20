@@ -3,3 +3,6 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# Agent worktrees, created by the Agent tool
+.claude/worktrees/

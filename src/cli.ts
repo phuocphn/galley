@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   }
 
   const port = Number(process.env.PORT ?? DEFAULT_PORT)
-  const url = await startServer(reviewRoot, port)
+  const { url } = await startServer(reviewRoot, port)
 
   console.log(`Reviewing ${reviewRoot}`)
   console.log(`  ${url}`)

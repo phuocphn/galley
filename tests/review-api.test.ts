@@ -37,7 +37,13 @@ describe('listing a Review', () => {
     const review = await fixture.getJson<ReviewListing>('/api/review')
 
     expect(review.drafts).toEqual([
-      { path: 'guides/setup.md', name: 'setup.md', extension: '.md', openNoteCount: 0 },
+      {
+        path: 'guides/setup.md',
+        name: 'setup.md',
+        extension: '.md',
+        openNoteCount: 0,
+        answeredNoteCount: 0,
+      },
     ])
   })
 

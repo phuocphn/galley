@@ -1,4 +1,11 @@
-import type { DraftContents, NewNote, Note, ReviewListing } from '../shared/types.js'
+import type {
+  DraftContents,
+  Handoff,
+  NewNote,
+  Note,
+  ReplyAuthor,
+  ReviewListing,
+} from '../shared/types.js'
 
 async function send<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -31,4 +38,16 @@ export function updateNote(id: string, body: string): Promise<Note> {
 
 export function deleteNote(id: string): Promise<void> {
   return send<void>(`/api/notes/${id}`, { method: 'DELETE' })
+}
+
+export function addReply(id: string, body: string, author: ReplyAuthor = 'reviewer'): Promise<Note> {
+  return send<Note>(`/api/notes/${id}/replies`, asJson('POST', { body, author }))
+}
+
+export function resolveNote(id: string): Promise<Note> {
+  return send<Note>(`/api/notes/${id}/resolve`, { method: 'POST' })
+}
+
+export function fetchHandoff(): Promise<Handoff> {
+  return send<Handoff>('/api/handoff')
 }

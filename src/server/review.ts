@@ -3,7 +3,7 @@ import path from 'node:path'
 import { DRAFT_EXTENSIONS, type DraftExtension, type DraftSummary } from '../shared/types.js'
 
 /** A Draft as the filesystem knows it, before its Notes are counted in. */
-export type DraftFile = Omit<DraftSummary, 'openNoteCount'>
+export type DraftFile = Omit<DraftSummary, 'openNoteCount' | 'answeredNoteCount'>
 
 /** Directories never worth walking into when looking for Drafts. */
 const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', '.feedback'])
