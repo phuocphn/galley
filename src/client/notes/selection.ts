@@ -1,7 +1,7 @@
 import { StateField, type EditorState, type Extension } from '@codemirror/state'
 import { EditorView, showTooltip, type Tooltip, type TooltipView } from '@codemirror/view'
 import { button } from './dom.js'
-import { composerField, openComposer } from './state.js'
+import { composerField, notesField, openComposer } from './state.js'
 
 /**
  * The floating **Add note** button, revealed by selecting text in a Draft.
@@ -27,6 +27,13 @@ function anchorableSelection(state: EditorState): { from: number; to: number } |
   // Whitespace alone would anchor to every gap in the Draft, and re-anchoring
   // would have nothing to tell those gaps apart by.
   if (state.sliceDoc(from, to).trim() === '') return null
+
+  // Saving a Note leaves the selection where it was, so without this the button
+  // would sit over the Note the reviewer just wrote, offering to write it again.
+  const alreadyNoted = state
+    .field(notesField)
+    .some((note) => note.range?.from === from && note.range.to === to)
+  if (alreadyNoted) return null
 
   return { from, to }
 }
@@ -82,37 +89,33 @@ const addNoteTooltipField = StateField.define<Tooltip | null>({
   provide: (field) => showTooltip.from(field),
 })
 
-// The tooltip machinery paints a bordered panel by default, which is wrong for
-// a single button. The extra class on the selector out-specifies that.
-const bareTooltip = {
-  padding: '0',
+// The button *is* the tooltip element, so CodeMirror's own panel styling and
+// this button's styling land on the same node. Everything therefore has to sit
+// at the same specificity as `&light .cm-tooltip`, or the panel rules win and
+// the button ends up white-on-white with no background at all.
+const addNoteButton = {
+  display: 'block',
+  padding: '3px 8px',
   border: 'none',
   borderRadius: '6px',
-  background: 'none',
+  background: '#0969da',
+  color: '#fff',
   boxShadow: '0 1px 3px rgba(31, 35, 40, 0.24)',
+  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+  fontSize: '12px',
+  fontWeight: '500',
+  lineHeight: '1.4',
+  whiteSpace: 'nowrap',
+  cursor: 'pointer',
 }
 
+const hovered = { background: '#0550ae' }
+
 const addNoteTooltipTheme = EditorView.baseTheme({
-  '&light .cm-tooltip.cm-addNoteToSelection': bareTooltip,
-  '&dark .cm-tooltip.cm-addNoteToSelection': bareTooltip,
-
-  '.cm-addNoteToSelection': {
-    display: 'block',
-    padding: '3px 8px',
-    background: '#0969da',
-    color: '#fff',
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
-    fontSize: '12px',
-    fontWeight: '500',
-    lineHeight: '1.4',
-    whiteSpace: 'nowrap',
-    cursor: 'pointer',
-  },
-
-  '.cm-addNoteToSelection:hover': {
-    background: '#0550ae',
-  },
+  '&light .cm-tooltip.cm-addNoteToSelection': addNoteButton,
+  '&dark .cm-tooltip.cm-addNoteToSelection': addNoteButton,
+  '&light .cm-tooltip.cm-addNoteToSelection:hover': hovered,
+  '&dark .cm-tooltip.cm-addNoteToSelection:hover': hovered,
 })
 
 /** Selecting text in the Draft offers to open the composer over that range. */
