@@ -8,7 +8,7 @@ import { startServer } from './server/serve.js'
 const DEFAULT_PORT = 4317
 
 function fail(message: string): never {
-  console.error(`ai-feedback-editor: ${message}`)
+  console.error(`galley: ${message}`)
   process.exit(1)
 }
 
@@ -25,7 +25,7 @@ function openBrowser(url: string): void {
 async function main(): Promise<void> {
   const [folderArgument] = process.argv.slice(2)
   if (!folderArgument) {
-    fail('give me a folder to review, e.g. `ai-feedback-editor ./out`')
+    fail('give me a folder to review, e.g. `galley ./out`')
   }
 
   const reviewRoot = path.resolve(folderArgument)

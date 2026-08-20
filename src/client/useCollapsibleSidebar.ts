@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-const STORAGE_KEY = 'ai-feedback-editor:sidebar-collapsed'
+const STORAGE_KEY = 'galley:sidebar-collapsed'
 
 /**
  * On a Mac, CodeMirror's standard keymap binds Ctrl-B to "move the cursor left"

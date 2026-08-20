@@ -1,11 +1,11 @@
 {
-  "name": "ai-feedback-editor",
+  "name": "@phuocphn/galley",
   "version": "0.1.0",
-  "description": "A local editor for writing feedback on AI-generated content",
+  "description": "Review AI-generated prose like a pull request",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "ai-feedback-editor": "./dist/cli.js"
+    "galley": "./dist/cli.js"
   },
   "files": [
     "dist"
@@ -22,7 +22,8 @@
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

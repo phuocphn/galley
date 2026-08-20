@@ -34,7 +34,7 @@ export async function createReviewFixture(
 ): Promise<ReviewFixture> {
   // The Review sits inside a container folder so tests can also place files
   // outside it. Both are torn down together.
-  const container = await mkdtemp(path.join(tmpdir(), 'ai-feedback-editor-'))
+  const container = await mkdtemp(path.join(tmpdir(), 'galley-'))
   const root = path.join(container, 'review')
   await mkdir(root, { recursive: true })
   const app = createReviewApp(root)
