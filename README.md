@@ -9,3 +9,16 @@ npx ai-feedback-editor ./out
 ```
 
 Status: in design. See [`CONTEXT.md`](./CONTEXT.md) for the domain language and [`docs/adr/`](./docs/adr) for the decisions behind it.
+
+## Development
+
+```bash
+npm install
+npm test          # Vitest against the Review API, over temp fixture folders
+npm run typecheck
+npm run build     # client (Vite) + server (tsc) into dist/
+node dist/cli.js ./some-folder
+```
+
+`npm run dev` serves the client with hot reload and proxies `/api` to a server
+started separately with `npm run dev:server -- ./some-folder`.

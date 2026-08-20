@@ -1,0 +1,63 @@
+@import 'tailwindcss';
+
+:root {
+  --review-border: #d1d9e0;
+  --review-surface: #ffffff;
+  --review-muted: #f6f8fa;
+  --review-text: #1f2328;
+  --review-dim: #59636e;
+  --review-accent: #0969da;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--review-text);
+  background: var(--review-surface);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+}
+
+/* The Draft pane: source, line numbers, no editor chrome we haven't asked for. */
+.cm-editor {
+  height: 100%;
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: var(--review-surface);
+}
+
+.cm-editor .cm-scroller {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.cm-editor .cm-gutters {
+  background: var(--review-surface);
+  border-right: 1px solid var(--review-border);
+  color: #8c959f;
+  user-select: none;
+}
+
+.cm-editor .cm-lineNumbers .cm-gutterElement {
+  padding: 0 12px 0 16px;
+  min-width: 3ch;
+}
+
+.cm-editor .cm-content {
+  padding: 0;
+}
+
+.cm-editor .cm-line {
+  padding: 0 16px;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+.cm-editor .cm-cursor {
+  display: none;
+}
