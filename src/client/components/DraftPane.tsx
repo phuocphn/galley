@@ -24,7 +24,7 @@ import {
 } from '../notes/index.js'
 import { closeComposer, composerField, openComposer, setEditing, setReattaching } from '../notes/state.js'
 import { previewKindFor } from '../preview/document.js'
-import type { PreviewMessage } from '../preview/frame.js'
+import type { PreviewGesture } from '../preview/frame.js'
 import { locateBlock, locatePhrase, type PreviewLocation } from '../preview/mapping.js'
 import { usePreviewMode } from '../preview/mode.js'
 import { DraftPreview } from './DraftPreview.js'
@@ -400,7 +400,7 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
    * worse than not moving.
    */
   const onPointedAt = useCallback(
-    (message: PreviewMessage) => {
+    (message: PreviewGesture) => {
       if (previewSource === undefined) return
 
       const located: PreviewLocation =
@@ -559,8 +559,16 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
           style={{ visibility: showingPreview ? 'hidden' : 'visible' }}
           data-testid="draft-pane"
         />
-        {showingPreview && previewSource !== undefined && (
-          <div className="absolute inset-0">
+        {/* Mounted on first use and hidden thereafter, never unmounted —
+            exactly as the source view is, and for the same reason written down
+            beside it: the state lives in the view, and rebuilding throws it
+            away. A Draft that is never previewed still costs nothing, because
+            the snapshot it renders is only taken when the reviewer asks. */}
+        {previewKind !== null && previewSource !== undefined && (
+          <div
+            className="absolute inset-0"
+            style={{ visibility: showingPreview ? 'visible' : 'hidden' }}
+          >
             <DraftPreview
               source={previewSource}
               kind={previewKind}

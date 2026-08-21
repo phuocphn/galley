@@ -49,8 +49,21 @@ export interface PreviewSelect {
   end: SelectedIn
 }
 
+/**
+ * Where the reviewer had read to. Reported as they scroll rather than asked for
+ * at the last moment, so the app always has the number when a document swap
+ * takes it away.
+ */
+export interface PreviewScrolled {
+  kind: 'scrolled'
+  top: number
+}
+
+/** A gesture: the reviewer pointing at a passage, either way of pointing. */
+export type PreviewGesture = PreviewClick | PreviewSelect
+
 /** Everything the Preview frame can say. */
-export type PreviewMessage = PreviewClick | PreviewSelect
+export type PreviewMessage = PreviewGesture | PreviewScrolled
 
 /** A selected phrase longer than this is not a phrase, and not worth matching. */
 const LONGEST_PHRASE = 20_000
@@ -84,6 +97,10 @@ export function asPreviewMessage(data: unknown): PreviewMessage | null {
     return start && end ? { kind: 'select', start, end } : null
   }
 
+  if (message.kind === 'scrolled' && typeof message.top === 'number' && message.top >= 0) {
+    return { kind: 'scrolled', top: message.top }
+  }
+
   return null
 }
 
@@ -99,6 +116,18 @@ export function asPreviewMessage(data: unknown): PreviewMessage | null {
  */
 export function composerStateMessage(open: boolean): unknown {
   return { galley: PREVIEW_MESSAGE, kind: 'composer', open }
+}
+
+/**
+ * Put the frame back where the reviewer was reading, after it has swapped
+ * documents. A number and nothing more.
+ *
+ * For a one-word edit the drift is invisible. For a full agent rewrite the
+ * position is approximate, which is honest: that is a document worth noticing
+ * has changed.
+ */
+export function restoreReadingMessage(top: number): unknown {
+  return { galley: PREVIEW_MESSAGE, kind: 'reading', top }
 }
 
 /**
@@ -233,6 +262,15 @@ export const PREVIEW_FRAME_SCRIPT = `
     addNote.style.top = top + 'px';
   }
 
+  var reporting = 0;
+  window.addEventListener('scroll', function () {
+    if (reporting) return;
+    reporting = requestAnimationFrame(function () {
+      reporting = 0;
+      parent.postMessage({ galley: '${PREVIEW_MESSAGE}', kind: 'scrolled', top: window.scrollY }, '*');
+    });
+  });
+
   document.addEventListener('selectionchange', showAddNote);
 
   document.addEventListener('click', function (event) {
@@ -253,10 +291,18 @@ export const PREVIEW_FRAME_SCRIPT = `
   window.addEventListener('message', function (event) {
     if (event.source !== parent) return;
     var data = event.data;
-    if (!data || data.galley !== '${PREVIEW_MESSAGE}' || data.kind !== 'composer') return;
-    composerOpen = data.open === true;
-    if (composerOpen) hideAddNote();
-    else showAddNote();
+    if (!data || data.galley !== '${PREVIEW_MESSAGE}') return;
+
+    if (data.kind === 'composer') {
+      composerOpen = data.open === true;
+      if (composerOpen) hideAddNote();
+      else showAddNote();
+      return;
+    }
+
+    if (data.kind === 'reading' && typeof data.top === 'number') {
+      window.scrollTo(0, data.top);
+    }
   });
 })();
 `
