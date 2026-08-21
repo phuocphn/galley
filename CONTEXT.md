@@ -13,7 +13,7 @@ The Draft as it is written — the text of the file itself. Anchors are cut from
 _Avoid_: Raw, code, markdown view, editor.
 
 **Preview**:
-The Draft as it reads — rendered, inert, and running nothing. A passage in the Preview can be pointed back at the Source it came from.
+The Draft as it reads — rendered, and running nothing of the Draft's own. A passage in the Preview can be pointed back at the Source it came from.
 _Avoid_: Rendered view, reading view, output, WYSIWYG.
 
 **Note**:
