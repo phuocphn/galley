@@ -6,7 +6,15 @@ A local editor for reviewing AI-generated prose and markup. You open a folder of
 
 **Draft**:
 A single AI-generated file under review (`.md`, `.html`, `.txt`). Editable in place.
-_Avoid_: Content, document, artifact, output, source.
+_Avoid_: Content, document, artifact, output.
+
+**Source**:
+The Draft as it is written — the text of the file itself. Anchors are cut from the Source, and Notes are attached there.
+_Avoid_: Raw, code, markdown view, editor.
+
+**Preview**:
+The Draft as it reads — rendered, inert, and running nothing. A passage in the Preview can be pointed back at the Source it came from.
+_Avoid_: Rendered view, reading view, output, WYSIWYG.
 
 **Note**:
 One piece of guidance a reviewer attaches to a range of a Draft, addressed to the AI agent that will revise it.
