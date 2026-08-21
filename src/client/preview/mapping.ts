@@ -13,6 +13,10 @@ import { CONTEXT_LENGTH, locateAnchor } from '../../shared/anchor.js'
  * the Source. HTML gives none — sanitising and parsing discard positions — so
  * an HTML passage is found by searching the whole Source for the words that
  * were rendered from it. See `docs/adr/0005`.
+ *
+ * Those same Markdown ranges answer the other question the two views ask of
+ * each other — which block an offset is in, and where a block begins — so
+ * switching views lands on the passage being read rather than at the top.
  */
 
 /**
@@ -92,6 +96,47 @@ export function locateBlock(source: string, block: number): PreviewLocation {
   const found = markdownBlocks(source)[block]
   if (!found) return { outcome: 'not-found' }
   return { outcome: 'block', from: found.from, to: found.to }
+}
+
+/**
+ * Which block of the Source an offset falls in.
+ *
+ * This and `offsetOfBlock` are the pair that keeps the two views on the same
+ * passage: the Preview says which block is at the top of what it is showing and
+ * this turns the answer round, the Source says what offset is at the top of
+ * what it is showing and this turns that into a block. Both read the same
+ * ranges the rendered blocks were stamped with, so a switch in one direction
+ * and back is a lookup and its inverse rather than two estimates that can
+ * disagree — which is what stops repeated switching from walking down a Draft.
+ *
+ * The whitespace between two blocks belongs to neither, and an offset landing
+ * in one of those gaps resolves *forwards*, to the block that starts next. That
+ * is the block being read: an offset at the top of a viewport sitting in the
+ * blank line under a heading has the paragraph below it filling the screen, not
+ * the heading that has just gone off the top. Resolving backwards would also
+ * walk a switch cycle up the Draft a block at a time, because a view scrolled
+ * so a block sits at its top routinely shows the last pixel of the gap above it.
+ *
+ * Past the last block there is nothing that starts next, so the last block
+ * stands — the trailing newlines of a Draft are still its end.
+ */
+export function blockAtOffset(source: string, offset: number): number | null {
+  const blocks = markdownBlocks(source)
+  if (blocks.length === 0) return null
+
+  const found = blocks.findIndex((block) => offset < block.to)
+  return found === -1 ? blocks.length - 1 : found
+}
+
+/**
+ * Where a block begins in the Source, for scrolling the Source view to it.
+ *
+ * The start rather than anywhere inside it, so that the offset handed back is
+ * one `blockAtOffset` resolves to the same block again: a view told to put this
+ * offset at its top is a view whose topmost block is this one.
+ */
+export function offsetOfBlock(source: string, block: number): number | null {
+  return markdownBlocks(source)[block]?.from ?? null
 }
 
 /** One end of a selection: the block it ran into, and the text selected there. */

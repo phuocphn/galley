@@ -75,11 +75,20 @@ export interface PreviewSelect {
 /**
  * Where the reviewer had read to. Reported as they scroll rather than asked for
  * at the last moment, so the app always has the number when a document swap
- * takes it away.
+ * takes it away — and when the reviewer switches to the Source, which is not a
+ * moment that can wait for a round trip through this frame without the Source
+ * visibly settling into place a beat after it appears.
+ *
+ * Two numbers for two different jobs. `top` is pixels, and is what puts the
+ * frame back where it was after it has swapped documents. `block` is the
+ * stamped block at the top of the viewport, and is what the Source is scrolled
+ * to on the way out; it is null when nothing stamped is on screen, which for a
+ * Markdown Draft means an empty one.
  */
 export interface PreviewScrolled {
   kind: 'scrolled'
   top: number
+  block: number | null
 }
 
 /**
@@ -163,7 +172,11 @@ export function asPreviewMessage(data: unknown): PreviewMessage | null {
   }
 
   if (message.kind === 'scrolled' && typeof message.top === 'number' && message.top >= 0) {
-    return { kind: 'scrolled', top: message.top }
+    const block =
+      Number.isInteger(message.block) && (message.block as number) >= 0
+        ? (message.block as number)
+        : null
+    return { kind: 'scrolled', top: message.top, block }
   }
 
   return null
@@ -196,6 +209,19 @@ export function restoreReadingMessage(top: number): unknown {
 }
 
 /**
+ * Bring a block to the top of the frame, because the Source view was being read
+ * at that block when the reviewer switched here.
+ *
+ * A block index rather than a pixel offset: the two views agree about which
+ * block a passage is, and about nothing else. Scrolling by percentage would
+ * agree about neither — a Draft whose Source is half table syntax renders to a
+ * document of quite different proportions — and would be wrong silently.
+ */
+export function showBlockMessage(block: number): unknown {
+  return { galley: PREVIEW_MESSAGE, kind: 'block', block }
+}
+
+/**
  * The listener injected into the Preview frame.
  *
  * It reports what the reviewer pointed at and nothing else: never a DOM node,
@@ -220,6 +246,14 @@ export function restoreReadingMessage(top: number): unknown {
  * decided once, by whether the document it was handed carries any stamp at all,
  * so a click on the margin of a Markdown Preview stays the no-op it has always
  * been rather than becoming a document-wide search for nothing.
+ *
+ * It also keeps the app told which block is at the top of the frame as the
+ * reviewer reads, and takes the reverse instruction — bring this block to the
+ * top — for when they arrive here from the Source. Both are block indices; the
+ * frame never computes an offset into the Source, which is the app's to work
+ * out from the Draft's text. A document with no stamps has no block to report,
+ * and says so, which is what leaves an HTML Draft's two views keeping their own
+ * positions instead.
  */
 export const PREVIEW_FRAME_SCRIPT = `
 (function () {
@@ -255,6 +289,26 @@ export const PREVIEW_FRAME_SCRIPT = `
     if (!stamped) return null;
     var index = Number(stamped.getAttribute(BLOCK));
     return Number.isInteger(index) && index >= 0 ? { index: index, element: stamped } : null;
+  }
+
+  /**
+   * The stamped block at the top of the viewport: the first one whose bottom
+   * edge has not yet gone off the top of the screen.
+   *
+   * Strictly past the top edge, so a block scrolled to exactly the top of the
+   * frame reports itself rather than the one that ends where it begins. That is
+   * what makes switching to the Source and back land here again instead of one
+   * block earlier every time.
+   */
+  function topmostBlock() {
+    var stamped = document.querySelectorAll('[' + BLOCK + ']');
+    for (var i = 0; i < stamped.length; i++) {
+      if (stamped[i].getBoundingClientRect().bottom > 0) {
+        var index = Number(stamped[i].getAttribute(BLOCK));
+        return Number.isInteger(index) && index >= 0 ? index : null;
+      }
+    }
+    return null;
   }
 
   /** The part of a selection that falls inside one block. */
@@ -423,7 +477,7 @@ export const PREVIEW_FRAME_SCRIPT = `
     if (reporting) return;
     reporting = requestAnimationFrame(function () {
       reporting = 0;
-      send({ kind: 'scrolled', top: window.scrollY });
+      send({ kind: 'scrolled', top: window.scrollY, block: topmostBlock() });
     });
   });
 
@@ -465,6 +519,16 @@ export const PREVIEW_FRAME_SCRIPT = `
 
     if (data.kind === 'reading' && typeof data.top === 'number') {
       window.scrollTo(0, data.top);
+      return;
+    }
+
+    // The block goes to the very top of the frame rather than near it. Anything
+    // else would be a margin the app would then have to subtract back off when
+    // it asked which block was topmost, and the two numbers would drift apart
+    // one switch at a time.
+    if (data.kind === 'block' && Number.isInteger(data.block)) {
+      var target = document.querySelector('[' + BLOCK + '="' + String(data.block) + '"]');
+      if (target) window.scrollTo(0, target.getBoundingClientRect().top + window.scrollY);
     }
   });
 })();
