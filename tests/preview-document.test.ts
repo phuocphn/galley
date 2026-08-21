@@ -36,13 +36,13 @@ describe('the preview document', () => {
   })
 
   it('carries the rendered Draft in its body', () => {
-    const document = buildPreviewDocument('<h1>A Draft</h1>')
+    const document = buildPreviewDocument('<h1>A Draft</h1>', 'markdown')
     expect(document.startsWith('<!doctype html>')).toBe(true)
     expect(document).toContain('<h1>A Draft</h1>')
   })
 
   it('denies every fetch but inline styles and data: images', () => {
-    const policy = policyOf(buildPreviewDocument(''))
+    const policy = policyOf(buildPreviewDocument('', 'markdown'))
     expect(policy).toContain("default-src 'none'")
     expect(policy).toContain('img-src data:')
     expect(policy).toContain("form-action 'none'")
@@ -63,15 +63,15 @@ describe('the preview document', () => {
   it('mints a fresh nonce for every rendered document', () => {
     // A nonce that outlived its document would be a value a Draft could come to
     // carry, and not knowing it is the whole of what makes it work.
-    const first = nonceOf(buildPreviewDocument('<p>A Draft</p>'))
-    const second = nonceOf(buildPreviewDocument('<p>A Draft</p>'))
+    const first = nonceOf(buildPreviewDocument('<p>A Draft</p>', 'markdown'))
+    const second = nonceOf(buildPreviewDocument('<p>A Draft</p>', 'markdown'))
 
     expect(first).not.toBe('')
     expect(first).not.toBe(second)
   })
 
   it('carries that nonce on its own script and on nothing else', () => {
-    const document = buildPreviewDocument('<script>steal()</script><p>A Draft</p>')
+    const document = buildPreviewDocument('<script>steal()</script><p>A Draft</p>', 'markdown')
     const nonce = nonceOf(document)
 
     const nonced = document.match(/nonce="([^"]*)"/g) ?? []
@@ -79,7 +79,7 @@ describe('the preview document', () => {
   })
 
   it('states the policy before anything that could load', () => {
-    const document = buildPreviewDocument('<img src="https://example.com/a.png">')
+    const document = buildPreviewDocument('<img src="https://example.com/a.png">', 'markdown')
     const policy = document.indexOf('Content-Security-Policy')
     expect(policy).toBeGreaterThan(-1)
     expect(policy).toBeLessThan(document.indexOf('<style>'))
@@ -87,11 +87,24 @@ describe('the preview document', () => {
   })
 
   it('sends links to a browsing context the frame is not allowed to open', () => {
-    expect(buildPreviewDocument('')).toContain('<base target="_blank">')
+    expect(buildPreviewDocument('', 'markdown')).toContain('<base target="_blank">')
+  })
+
+  it('leaves an HTML Draft its own width, and holds a Markdown one to a column', () => {
+    // Markdown renders to bare tags and has no measure of its own, so the shell
+    // supplies one. A generated HTML page brings its own layout — often wider
+    // than a reading column, and often a grid — and a `max-width` it never
+    // asked for is not a rule it knows to override.
+    expect(buildPreviewDocument('<p>A Draft</p>', 'markdown')).toContain('max-width')
+    expect(buildPreviewDocument('<p>A Draft</p>', 'html')).not.toContain('max-width')
+  })
+
+  it('gives an HTML Draft a page to sit on rather than the pane showing through', () => {
+    expect(buildPreviewDocument('', 'html')).toContain('background: #ffffff')
   })
 
   it('states the policy before the script it permits', () => {
-    const document = buildPreviewDocument('<p>A Draft</p>')
+    const document = buildPreviewDocument('<p>A Draft</p>', 'markdown')
     expect(document.indexOf('Content-Security-Policy')).toBeLessThan(document.indexOf('<script'))
   })
 })
