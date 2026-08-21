@@ -472,14 +472,43 @@ export const PREVIEW_FRAME_SCRIPT = `
     addNote.style.top = top + 'px';
   }
 
+  function reportReading() {
+    send({ kind: 'scrolled', top: window.scrollY, block: topmostBlock() });
+  }
+
   var reporting = 0;
   window.addEventListener('scroll', function () {
     if (reporting) return;
     reporting = requestAnimationFrame(function () {
       reporting = 0;
-      send({ kind: 'scrolled', top: window.scrollY, block: topmostBlock() });
+      reportReading();
     });
   });
+
+  /**
+   * Bring a block to the top of the frame, and say where that left us.
+   *
+   * Measured in an animation frame rather than the instant the app asks. The
+   * app asks as soon as this document has loaded, and a document that has
+   * loaded has not necessarily been laid out yet: every rectangle in it is
+   * still zero, so every block appears to begin at the top and scrolling to one
+   * is scrolling to the top. It fails in silence, too, and permanently: nothing
+   * moved, so no scroll event fires, so the app is never told the Preview is
+   * not where it asked for it to be. An animation frame is the first moment the
+   * document has a shape to measure.
+   *
+   * The reading position is reported whether or not the scroll moved anything,
+   * for the same reason: being told to show the block already at the top is a
+   * no-op, and a no-op that says nothing leaves the app believing the Preview
+   * is somewhere it is not.
+   */
+  function bringToTop(index) {
+    requestAnimationFrame(function () {
+      var target = document.querySelector('[' + BLOCK + '="' + String(index) + '"]');
+      if (target) window.scrollTo(0, target.getBoundingClientRect().top + window.scrollY);
+      reportReading();
+    });
+  }
 
   document.addEventListener('selectionchange', showAddNote);
 
@@ -527,8 +556,7 @@ export const PREVIEW_FRAME_SCRIPT = `
     // it asked which block was topmost, and the two numbers would drift apart
     // one switch at a time.
     if (data.kind === 'block' && Number.isInteger(data.block)) {
-      var target = document.querySelector('[' + BLOCK + '="' + String(data.block) + '"]');
-      if (target) window.scrollTo(0, target.getBoundingClientRect().top + window.scrollY);
+      bringToTop(data.block);
     }
   });
 })();

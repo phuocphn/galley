@@ -631,10 +631,21 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
       // time they change their mind about which view to read in.
       const block = previewTopBlock.current
       const offset = block === null ? null : offsetOfBlock(previewSourceNow.current ?? '', block)
-      const at = Math.min(offset ?? 0, editor.state.doc.length)
+      // Not knowing where the Preview had been read to is not the same as it
+      // having been at the top, and answering a shrug with the top of the Draft
+      // is the confidently-wrong landing this design refuses everywhere else.
+      // The Source is left exactly where it was instead — somewhere the
+      // reviewer has at least been — and only asked to measure itself again,
+      // now that it is back on screen.
+      if (offset === null) {
+        editor.requestMeasure()
+        return
+      }
+
       // The selection is left alone: arriving on a passage is not pointing at
       // it, and the Note the reviewer may be about to write is not about the
       // fact that they scrolled here.
+      const at = Math.min(offset, editor.state.doc.length)
       editor.dispatch({ effects: EditorView.scrollIntoView(at, { y: 'start', yMargin: 0 }) })
       return
     }
