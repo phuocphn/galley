@@ -2,7 +2,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { html } from '@codemirror/lang-html'
 import { markdown } from '@codemirror/lang-markdown'
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
-import { EditorState, type Extension } from '@codemirror/state'
+import { EditorSelection, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { DraftContents, DraftExtension, ResolvedNote } from '../../shared/types.js'
@@ -24,6 +24,8 @@ import {
 } from '../notes/index.js'
 import { closeComposer, setEditing, setReattaching } from '../notes/state.js'
 import { previewKindFor } from '../preview/document.js'
+import type { PreviewMessage } from '../preview/frame.js'
+import { locateBlock } from '../preview/mapping.js'
 import { usePreviewMode } from '../preview/mode.js'
 import { DraftPreview } from './DraftPreview.js'
 
@@ -69,6 +71,12 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   const view = useRef<EditorView>(null)
   /** Where the source view was scrolled to when the preview took the pane. */
   const sourceScrollTop = useRef(0)
+  /**
+   * A range the reviewer pointed at in the Preview, waiting for the Source view
+   * to come back so it can be selected. An explicit target, so it overrides the
+   * remembered scroll offset for that one switch.
+   */
+  const pendingJump = useRef<{ from: number; to: number } | null>(null)
 
   /**
    * The Draft as we last knew it on disk: what we read, or what we last wrote.
@@ -354,6 +362,30 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   }, [reattaching])
 
   /**
+   * The reviewer pointed at a passage in the Preview: take them to it in the
+   * Source.
+   *
+   * A click is not a request to write a Note, so it stops at the selection and
+   * the floating **Add note** button — which is also what is wanted when the
+   * faster fix is to correct the sentence by hand (`docs/adr/0003`). Nothing
+   * moves until the mapping has succeeded: landing on the wrong passage is
+   * worse than not moving.
+   */
+  const onPointedAt = useCallback(
+    (message: PreviewMessage) => {
+      if (previewSource === undefined) return
+      const located = locateBlock(previewSource, message.block)
+      if (located.outcome === 'not-found') return
+
+      pendingJump.current = { from: located.from, to: located.to }
+      // Review-wide, so the next Draft opens in its Source too: "which view am
+      // I in" stays one answer rather than one answer with exceptions.
+      setPreviewing(false)
+    },
+    [previewSource, setPreviewing],
+  )
+
+  /**
    * Switching to the Preview writes what has been typed, and then snapshots the
    * buffer for it to render.
    *
@@ -377,14 +409,33 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
    * is saved and restored anyway rather than relying on that.
    */
   useLayoutEffect(() => {
-    const scroller = view.current?.scrollDOM
-    if (!scroller) return
+    const editor = view.current
+    const scroller = editor?.scrollDOM
+    if (!editor || !scroller) return
+
     if (showingPreview) {
       sourceScrollTop.current = scroller.scrollTop
       return
     }
+
+    const jump = pendingJump.current
+    if (jump) {
+      pendingJump.current = null
+      const from = Math.min(jump.from, editor.state.doc.length)
+      const to = Math.min(jump.to, editor.state.doc.length)
+      // Selected on arrival, so if the mapping landed somewhere odd the
+      // reviewer sees it in the same glance rather than finding it later in the
+      // sidecar — and can narrow it before writing anything.
+      editor.dispatch({
+        selection: EditorSelection.single(from, to),
+        effects: EditorView.scrollIntoView(EditorSelection.range(from, to), { y: 'center' }),
+      })
+      editor.focus()
+      return
+    }
+
     scroller.scrollTop = sourceScrollTop.current
-    view.current?.requestMeasure()
+    editor.requestMeasure()
   }, [showingPreview])
 
   return (
@@ -450,7 +501,7 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
         />
         {showingPreview && previewSource !== undefined && (
           <div className="absolute inset-0">
-            <DraftPreview source={previewSource} kind={previewKind} />
+            <DraftPreview source={previewSource} kind={previewKind} onPointedAt={onPointedAt} />
           </div>
         )}
       </div>
