@@ -126,6 +126,17 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   /** The block at the top of the Preview, as the frame last reported it. */
   const previewTopBlock = useRef<number | null>(null)
   /**
+   * The block the Source view was on as the Preview took the pane.
+   *
+   * Measured in the commit that hides the Source view rather than in the effect
+   * that follows it, because that is the last moment its scroller still says
+   * where the reviewer was: hiding the view costs CodeMirror its viewport, and
+   * the offset goes with it. Read a paint later, the answer is the top of the
+   * Draft every time, which is exactly the "switching views is a navigation
+   * task" complaint this is here to answer.
+   */
+  const arrivingBlock = useRef<number | null>(null)
+  /**
    * A range the reviewer pointed at in the Preview, waiting for the Source view
    * to come back so it can be selected. An explicit target — *take me to this*
    * — so it beats the passage the two views would otherwise agree on for that
@@ -556,9 +567,11 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
     setMappingNote(undefined)
     setComposerOpen(view.current?.state.field(composerField) !== null)
     snapshotForPreview()
-    setArrival({ block: sourceTopBlock() })
+    // Taken in the layout effect above, which ran in the commit that hid the
+    // Source view and so is the only place the question could still be asked.
+    setArrival({ block: arrivingBlock.current })
     void flush()
-  }, [showingPreview, flush, snapshotForPreview, sourceTopBlock])
+  }, [showingPreview, flush, snapshotForPreview])
 
   /**
    * The source view is hidden, never unmounted, while the preview is up. Its
@@ -581,8 +594,9 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
     if (!editor || !scroller) return
 
     if (showingPreview) {
-      // The Preview asks for the Source's position as it arrives rather than
-      // being handed it here, so a Markdown Draft has nothing to put down.
+      arrivingBlock.current = sourceTopBlock()
+      // An HTML Draft has no blocks to name a passage with, so its Source view
+      // keeps its own offset instead — see `docs/adr/0005`.
       if (!hasBlocks) sourceScrollTop.current = scroller.scrollTop
       return
     }
@@ -627,7 +641,7 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
 
     scroller.scrollTop = sourceScrollTop.current
     editor.requestMeasure()
-  }, [showingPreview, hasBlocks])
+  }, [showingPreview, hasBlocks, sourceTopBlock])
 
   return (
     <div className="flex h-full flex-col">
