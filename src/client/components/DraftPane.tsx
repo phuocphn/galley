@@ -26,13 +26,15 @@ import { closeComposer, composerField, openComposer, setEditing, setReattaching 
 import { previewKindFor, type PreviewKind } from '../preview/document.js'
 import { asksForANote, type PreviewGesture } from '../preview/frame.js'
 import {
+  blockAtOffset,
   locateBlock,
   locatePhrase,
   locateRenderedText,
+  offsetOfBlock,
   type PreviewLocation,
 } from '../preview/mapping.js'
 import { usePreviewMode } from '../preview/mode.js'
-import { DraftPreview } from './DraftPreview.js'
+import { DraftPreview, type PreviewArrival } from './DraftPreview.js'
 
 /**
  * How long the reviewer has to stop typing before the Draft is written.
@@ -110,12 +112,35 @@ interface DraftPaneProps {
 export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: DraftPaneProps) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView>(null)
-  /** Where the source view was scrolled to when the preview took the pane. */
+  /**
+   * Where the Source view was scrolled to when the Preview took the pane.
+   *
+   * Only an HTML Draft has one. Its two views cannot be kept on the same
+   * passage, because sanitising and parsing throw away the positions that would
+   * say where a rendered block came from (ADR 0005), so each view keeps its own
+   * offset instead. A Markdown Draft's Source position is worked out afresh
+   * from the block the Preview was being read at, every time, so there is
+   * nothing here to remember and no stale number to go stale.
+   */
   const sourceScrollTop = useRef(0)
+  /** The block at the top of the Preview, as the frame last reported it. */
+  const previewTopBlock = useRef<number | null>(null)
+  /**
+   * The block the Source view was on as the Preview took the pane.
+   *
+   * Measured in the commit that hides the Source view rather than in the effect
+   * that follows it, because that is the last moment its scroller still says
+   * where the reviewer was: hiding the view costs CodeMirror its viewport, and
+   * the offset goes with it. Read a paint later, the answer is the top of the
+   * Draft every time, which is exactly the "switching views is a navigation
+   * task" complaint this is here to answer.
+   */
+  const arrivingBlock = useRef<number | null>(null)
   /**
    * A range the reviewer pointed at in the Preview, waiting for the Source view
-   * to come back so it can be selected. An explicit target, so it overrides the
-   * remembered scroll offset for that one switch.
+   * to come back so it can be selected. An explicit target — *take me to this*
+   * — so it beats the passage the two views would otherwise agree on for that
+   * one switch.
    */
   const pendingJump = useRef<{ from: number; to: number; compose: boolean } | null>(null)
 
@@ -143,6 +168,15 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   // while the reviewer is in preview mode, and rendering resumes on the next
   // Draft that has a preview.
   const showingPreview = previewing && previewKind !== null
+  /**
+   * Whether the two views can be kept on the same passage at all. Only Markdown
+   * stamps its rendered blocks with where they came from, so only Markdown can
+   * answer *which passage is this* from either side (ADR 0005).
+   */
+  const hasBlocks = previewKind === 'markdown'
+  // Read from a callback built once, which outlives the render that made it.
+  const hasBlocksNow = useRef(false)
+  hasBlocksNow.current = hasBlocks
 
   /**
    * The Source the Preview is rendering: a snapshot of the buffer, taken when
@@ -162,9 +196,27 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
    */
   const [previewSource, setPreviewSource] = useState<string>()
 
+  /**
+   * The reviewer's last arrival in the Preview, carrying the passage the Source
+   * view was on as they left it. Set in the same breath as the snapshot above,
+   * so the block index and the document it counts blocks in are one decision
+   * rather than two that can be taken against different text.
+   */
+  const [arrival, setArrival] = useState<PreviewArrival>()
+
   // Read from effects that do not otherwise depend on the flag.
   const showingPreviewNow = useRef(false)
   showingPreviewNow.current = showingPreview
+
+  /**
+   * The Source the Preview's blocks were numbered from, for the switch back.
+   *
+   * Read from a layout effect that must not re-run when the snapshot changes —
+   * the snapshot moving is an agent rewriting the Draft, which is not a switch
+   * and is nobody's cue to scroll anything.
+   */
+  const previewSourceNow = useRef<string>(undefined)
+  previewSourceNow.current = previewSource
 
   /**
    * Why the last Preview gesture did not land where it was aimed, if it didn't.
@@ -224,6 +276,35 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   const snapshotForPreview = useCallback(() => {
     const editor = view.current
     if (editor && showingPreviewNow.current) setPreviewSource(editor.state.doc.toString())
+  }, [])
+
+  /**
+   * Which block of the Draft the Source view has at the top of it.
+   *
+   * The top of the *visible* area, which is not where CodeMirror's rendered
+   * viewport starts: it renders a margin of lines above and below the screen,
+   * so `viewport.from` is routinely most of a screenful early and would land
+   * the reviewer above the passage they were reading, every single time.
+   * Heights are measured from the top of the document, so the visible top is
+   * the scroller's own top less wherever the document currently begins.
+   *
+   * The buffer is what the blocks are counted from, and it is what the Preview
+   * is about to render: this is read in the same breath as the snapshot is
+   * taken, and the Source view is hidden from then on, so the two cannot have
+   * drifted apart by the time the block index is used.
+   */
+  const sourceTopBlock = useCallback((): number | null => {
+    const editor = view.current
+    if (!editor || !hasBlocksNow.current) return null
+
+    const visibleTop = editor.scrollDOM.getBoundingClientRect().top - editor.documentTop
+    const line = editor.lineBlockAtHeight(visibleTop)
+    return blockAtOffset(editor.state.doc.toString(), line.from)
+  }, [])
+
+  /** The Preview reporting where it has been read to, as it is read. */
+  const onReadingBlock = useCallback((block: number | null) => {
+    previewTopBlock.current = block
   }, [])
 
   /**
@@ -321,10 +402,14 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
     })
     view.current = editor
     editor.dispatch({ effects: setNotes.of(draft.notes) })
-    // A remembered scroll offset belongs to the Draft it was taken from.
+    // A scroll offset, and a reading position, belong to the Draft they were
+    // taken from. Neither view's survives a switch to another Draft.
     sourceScrollTop.current = 0
-    // As does a snapshot: this Draft has not been previewed yet.
+    previewTopBlock.current = null
+    // Nor does a snapshot, nor an arrival: this Draft has not been previewed
+    // yet, and a block index counts blocks of the Draft it was taken from.
     setPreviewSource(undefined)
+    setArrival(undefined)
 
     return () => {
       // Moving to another Draft is not a reason to lose the last keystrokes.
@@ -462,20 +547,30 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   )
 
   /**
-   * Switching to the Preview writes what has been typed, and then snapshots the
-   * buffer for it to render.
+   * Switching to the Preview snapshots the buffer for it to render, and starts
+   * a write of what has been typed.
    *
    * The flush is what keeps disk saying what the reviewer is looking at, since
    * the server cuts an Anchor out of the file rather than out of the snapshot.
    * A flush that fails does not hold the Preview back — it renders the buffer
    * either way, and a Note written from it then fails exactly as a Note written
    * in the Source view already does.
+   *
+   * The snapshot is taken here and not behind the flush, because it comes from
+   * the buffer and the flush is about disk. Taking it now means the document
+   * the Preview is about to render and the block the Source is being read at
+   * are settled in the same commit, so the block index the two views trade
+   * cannot be an index into a document neither of them is showing.
    */
   useEffect(() => {
     if (!showingPreview) return
     setMappingNote(undefined)
     setComposerOpen(view.current?.state.field(composerField) !== null)
-    void flush().finally(snapshotForPreview)
+    snapshotForPreview()
+    // Taken in the layout effect above, which ran in the commit that hid the
+    // Source view and so is the only place the question could still be asked.
+    setArrival({ block: arrivingBlock.current })
+    void flush()
   }, [showingPreview, flush, snapshotForPreview])
 
   /**
@@ -485,6 +580,13 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
    * that away. `visibility` rather than `display` keeps the view laid out, so
    * CodeMirror can still measure and the scroller keeps its offset; the offset
    * is saved and restored anyway rather than relying on that.
+   *
+   * Where it lands on the way back is a question with three answers, in order
+   * of how loudly the reviewer asked for it: an explicit jump from the Preview
+   * wins outright; failing that a Markdown Draft goes to the passage the
+   * Preview was being read at, worked out fresh from the block ranges; failing
+   * that an HTML Draft, which has no block ranges to work anything out from,
+   * goes back to its own remembered offset.
    */
   useLayoutEffect(() => {
     const editor = view.current
@@ -492,7 +594,10 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
     if (!editor || !scroller) return
 
     if (showingPreview) {
-      sourceScrollTop.current = scroller.scrollTop
+      arrivingBlock.current = sourceTopBlock()
+      // An HTML Draft has no blocks to name a passage with, so its Source view
+      // keeps its own offset instead — see `docs/adr/0005`.
+      if (!hasBlocks) sourceScrollTop.current = scroller.scrollTop
       return
     }
 
@@ -517,9 +622,37 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
       return
     }
 
+    if (hasBlocks) {
+      // The passage the Preview was showing, in the Source's own coordinates.
+      // The block goes to the top rather than to the middle, because the top is
+      // where the Preview was reporting from: put it anywhere else and each
+      // switch would answer a slightly different question from the last one,
+      // which is how a reader ends up a paragraph further down the Draft every
+      // time they change their mind about which view to read in.
+      const block = previewTopBlock.current
+      const offset = block === null ? null : offsetOfBlock(previewSourceNow.current ?? '', block)
+      // Not knowing where the Preview had been read to is not the same as it
+      // having been at the top, and answering a shrug with the top of the Draft
+      // is the confidently-wrong landing this design refuses everywhere else.
+      // The Source is left exactly where it was instead — somewhere the
+      // reviewer has at least been — and only asked to measure itself again,
+      // now that it is back on screen.
+      if (offset === null) {
+        editor.requestMeasure()
+        return
+      }
+
+      // The selection is left alone: arriving on a passage is not pointing at
+      // it, and the Note the reviewer may be about to write is not about the
+      // fact that they scrolled here.
+      const at = Math.min(offset, editor.state.doc.length)
+      editor.dispatch({ effects: EditorView.scrollIntoView(at, { y: 'start', yMargin: 0 }) })
+      return
+    }
+
     scroller.scrollTop = sourceScrollTop.current
     editor.requestMeasure()
-  }, [showingPreview])
+  }, [showingPreview, hasBlocks, sourceTopBlock])
 
   return (
     <div className="flex h-full flex-col">
@@ -600,6 +733,8 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
               source={previewSource}
               kind={previewKind}
               composerOpen={composerOpen}
+              arrival={arrival}
+              onReadingBlock={onReadingBlock}
               onPointedAt={onPointedAt}
             />
           </div>

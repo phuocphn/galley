@@ -4,9 +4,24 @@ import {
   asPreviewMessage,
   composerStateMessage,
   restoreReadingMessage,
+  showBlockMessage,
   type PreviewGesture,
 } from '../preview/frame.js'
 import { renderPreviewDocument } from '../preview/render.js'
+
+/**
+ * The reviewer arriving in the Preview, and the block of the Draft they were
+ * reading in the Source as they left it.
+ *
+ * The block is worked out by the pane, which owns the Source's coordinates, and
+ * travels with the arrival rather than being asked for when the frame is ready
+ * for it: the frame may not be ready until after a document swap, by which time
+ * the Source has been hidden and the question is no longer being asked of the
+ * same text.
+ */
+export interface PreviewArrival {
+  block: number | null
+}
 
 interface DraftPreviewProps {
   /**
@@ -22,6 +37,18 @@ interface DraftPreviewProps {
    * a Note being written mid-sentence.
    */
   composerOpen: boolean
+  /**
+   * The reviewer switching to the Preview, and the passage they were on when
+   * they did. A new object every time, so switching back to a Draft's Preview
+   * without having moved in the Source is still an arrival to be answered.
+   *
+   * Undefined until they have switched here at all, and carrying a null block
+   * when the Draft has none for the two views to agree about — an HTML Draft
+   * (ADR 0005), or an empty one.
+   */
+  arrival: PreviewArrival | undefined
+  /** Called as the reviewer reads, with the block now at the top of the frame. */
+  onReadingBlock: (block: number | null) => void
   /** Called when the reviewer points at something in the rendered Draft. */
   onPointedAt: (gesture: PreviewGesture) => void
 }
@@ -45,7 +72,14 @@ interface DraftPreviewProps {
  * same **Add note** button the Source view does, and the Note it opens is
  * indistinguishable from one written there.
  */
-export function DraftPreview({ source, kind, composerOpen, onPointedAt }: DraftPreviewProps) {
+export function DraftPreview({
+  source,
+  kind,
+  composerOpen,
+  arrival,
+  onReadingBlock,
+  onPointedAt,
+}: DraftPreviewProps) {
   const frame = useRef<HTMLIFrameElement>(null)
   /**
    * Where the reviewer had read to, kept across a document swap.
@@ -67,6 +101,20 @@ export function DraftPreview({ source, kind, composerOpen, onPointedAt }: DraftP
   const previewDocument = useMemo(() => renderPreviewDocument(source, kind), [source, kind])
 
   /**
+   * Whether the frame is showing the document above, rather than still parsing
+   * it. A message posted to a frame mid-load is delivered to the document being
+   * replaced and then thrown away with it, so anything that has to arrive waits
+   * here for the load event instead.
+   */
+  const loaded = useRef(false)
+  useEffect(() => {
+    loaded.current = false
+  }, [previewDocument])
+
+  /** An arrival that has not reached the frame yet, because it was mid-load. */
+  const undelivered = useRef<PreviewArrival>(undefined)
+
+  /**
    * Tell the frame whether a composer is open, and put it back where the
    * reviewer was reading. Sent on load as well as on change, because a frame
    * that has just swapped documents has forgotten both.
@@ -81,6 +129,40 @@ export function DraftPreview({ source, kind, composerOpen, onPointedAt }: DraftP
   useEffect(tellFrame, [tellFrame])
 
   /**
+   * Put the frame on the passage the Source view was being read at, once it has
+   * a document to put it on.
+   *
+   * Sent after `tellFrame`, and so after the remembered reading offset, because
+   * on arrival the two disagree and the derived position is the one that is
+   * right: where the reviewer was left last time is not an answer to where they
+   * are now. Only on arrival, though — the remembered offset is what a document
+   * swap needs, and an agent rewriting the Draft while it is being read must
+   * leave the reader near where they had read to rather than throw them back to
+   * wherever they came in.
+   */
+  const putOnPassage = useCallback(() => {
+    const window = frame.current?.contentWindow
+    const arriving = undelivered.current
+    if (!arriving || !loaded.current || !window) return
+
+    undelivered.current = undefined
+    if (arriving.block !== null) window.postMessage(showBlockMessage(arriving.block), '*')
+  }, [])
+
+  useEffect(() => {
+    if (!arrival) return
+    undelivered.current = arrival
+    putOnPassage()
+  }, [arrival, putOnPassage])
+
+  /** The frame has a document again: it has forgotten everything it was told. */
+  const onLoad = useCallback(() => {
+    loaded.current = true
+    tellFrame()
+    putOnPassage()
+  }, [tellFrame, putOnPassage])
+
+  /**
    * What the frame says is untrusted input, and arrives on a window every page
    * on the machine can post to. The frame has no `allow-same-origin`, so its
    * origin is opaque and `event.origin` says only "null" — the sending window's
@@ -93,9 +175,12 @@ export function DraftPreview({ source, kind, composerOpen, onPointedAt }: DraftP
       const message = asPreviewMessage(event.data)
       if (!message) return
 
-      // Where they have read to is this component's business, not the pane's.
+      // Where they have read to in pixels is this component's business, and
+      // outlives only a document swap. Which block they have read to is the
+      // pane's, because it is the Source that has to be scrolled to it.
       if (message.kind === 'scrolled') {
         readingTop.current = message.top
+        onReadingBlock(message.block)
         return
       }
       onPointedAt(message)
@@ -103,7 +188,7 @@ export function DraftPreview({ source, kind, composerOpen, onPointedAt }: DraftP
 
     window.addEventListener('message', receive)
     return () => window.removeEventListener('message', receive)
-  }, [onPointedAt])
+  }, [onPointedAt, onReadingBlock])
 
   return (
     <iframe
@@ -117,7 +202,7 @@ export function DraftPreview({ source, kind, composerOpen, onPointedAt }: DraftP
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
       srcDoc={previewDocument}
-      onLoad={tellFrame}
+      onLoad={onLoad}
     />
   )
 }

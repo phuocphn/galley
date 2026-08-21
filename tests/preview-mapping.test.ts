@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  blockAtOffset,
   locateBlock,
   locatePhrase,
   locateRenderedText,
   markdownBlocks,
+  offsetOfBlock,
 } from '../src/client/preview/mapping.js'
 
 /**
@@ -331,5 +333,92 @@ describe('a passage pointed at in an HTML Preview', () => {
 
   it('has nothing to offer for an empty Draft', () => {
     expect(locateRenderedText('', read('anything at all'))).toEqual({ outcome: 'not-found' })
+  })
+})
+
+/**
+ * The two lookups that keep the Source and the Preview on the same passage.
+ *
+ * They are each other's inverse, and that is the whole of what makes switching
+ * views safe to do repeatedly: a reviewer who reads a paragraph, switches to
+ * fix a word, and switches back must find the same paragraph rather than the
+ * one below it, and then the one below that. Drift is the failure mode worth
+ * testing for, because it is slow enough to look like nothing.
+ */
+describe('the passage the two views are both on', () => {
+  it('resolves a block to an offset and back, for every block of a Draft', () => {
+    const blocks = markdownBlocks(DRAFT)
+    expect(blocks.length).toBeGreaterThan(1)
+
+    for (let block = 0; block < blocks.length; block++) {
+      const offset = offsetOfBlock(DRAFT, block)
+      if (offset === null) throw new Error(`block ${block} has no offset`)
+      expect(blockAtOffset(DRAFT, offset)).toBe(block)
+    }
+  })
+
+  it('resolves every offset inside a block to that block', () => {
+    // Not just the first character: the reviewer scrolls to wherever they
+    // scroll to, and a long paragraph is many screens of offsets that are all
+    // the same passage.
+    markdownBlocks(DRAFT).forEach((block, index) => {
+      for (let offset = block.from; offset < block.to; offset++) {
+        expect(blockAtOffset(DRAFT, offset)).toBe(index)
+      }
+    })
+  })
+
+  it('settles rather than drifting when the views are switched over and over', () => {
+    // A switch there and back is a lookup and its inverse, so the offset it
+    // lands on is the offset it started from — however many times it is done.
+    let offset = offsetOfBlock(DRAFT, 3)
+    if (offset === null) throw new Error('unreachable')
+
+    for (let cycle = 0; cycle < 5; cycle++) {
+      const block = blockAtOffset(DRAFT, offset)
+      if (block === null) throw new Error('unreachable')
+      const next = offsetOfBlock(DRAFT, block)
+      if (next === null) throw new Error('unreachable')
+      expect(next).toBe(offset)
+      offset = next
+    }
+  })
+
+  it('resolves the gap between two blocks to the block that starts next', () => {
+    // The blank line under a heading belongs to no block. A view whose top edge
+    // sits in it has the paragraph below filling the screen, not the heading
+    // that has just gone off the top.
+    const [heading, paragraph] = markdownBlocks(DRAFT)
+    if (!heading || !paragraph) throw new Error('unreachable')
+    expect(paragraph.from).toBeGreaterThan(heading.to)
+
+    for (let offset = heading.to; offset < paragraph.from; offset++) {
+      expect(blockAtOffset(DRAFT, offset)).toBe(1)
+    }
+  })
+
+  it('resolves an offset before the first block to it', () => {
+    const padded = `\n\n${DRAFT}`
+    expect(blockAtOffset(padded, 0)).toBe(0)
+    expect(offsetOfBlock(padded, 0)).toBe(2)
+  })
+
+  it('holds the last block for an offset past the end of the Draft', () => {
+    // The trailing newlines of a Draft are still its end, and a reviewer who
+    // scrolled to the bottom of one view expects the bottom of the other.
+    const last = markdownBlocks(DRAFT).length - 1
+    expect(blockAtOffset(DRAFT, DRAFT.length)).toBe(last)
+    expect(blockAtOffset(DRAFT, DRAFT.length + 1_000)).toBe(last)
+  })
+
+  it('has no passage to offer for a Draft with no blocks in it', () => {
+    expect(blockAtOffset('', 0)).toBeNull()
+    expect(blockAtOffset('\n\n   \n', 2)).toBeNull()
+    expect(offsetOfBlock('', 0)).toBeNull()
+  })
+
+  it('declines a block the Draft does not have', () => {
+    expect(offsetOfBlock(DRAFT, 99)).toBeNull()
+    expect(offsetOfBlock(DRAFT, -1)).toBeNull()
   })
 })
