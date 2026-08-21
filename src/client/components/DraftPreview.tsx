@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { PreviewKind } from '../preview/document.js'
-import { asPreviewMessage, type PreviewMessage } from '../preview/frame.js'
+import { asPreviewMessage, composerStateMessage, type PreviewMessage } from '../preview/frame.js'
 import { renderPreviewDocument } from '../preview/render.js'
 
 interface DraftPreviewProps {
@@ -11,6 +11,12 @@ interface DraftPreviewProps {
    */
   source: string
   kind: PreviewKind
+  /**
+   * Whether a composer is already open in the Source view behind this. The
+   * frame's **Add note** button stands down while one is, rather than replacing
+   * a Note being written mid-sentence.
+   */
+  composerOpen: boolean
   /** Called when the reviewer points at something in the rendered Draft. */
   onPointedAt: (message: PreviewMessage) => void
 }
@@ -29,12 +35,24 @@ interface DraftPreviewProps {
  * the frame is the layer that does not depend on being right about every
  * payload. See `docs/adr/0004`.
  *
- * Notes are neither shown nor created here. The Preview is for reading, and for
- * pointing back at the Source that guidance gets attached to.
+ * Existing Notes are not shown here — that is the reverse mapping, and is not
+ * built. A new one can be begun here, though: selecting a phrase offers the
+ * same **Add note** button the Source view does, and the Note it opens is
+ * indistinguishable from one written there.
  */
-export function DraftPreview({ source, kind, onPointedAt }: DraftPreviewProps) {
+export function DraftPreview({ source, kind, composerOpen, onPointedAt }: DraftPreviewProps) {
   const frame = useRef<HTMLIFrameElement>(null)
   const previewDocument = useMemo(() => renderPreviewDocument(source, kind), [source, kind])
+
+  /**
+   * Tell the frame whether a composer is open. Sent on load as well as on
+   * change, because a frame that has just swapped documents has forgotten.
+   */
+  const tellFrame = useCallback(() => {
+    frame.current?.contentWindow?.postMessage(composerStateMessage(composerOpen), '*')
+  }, [composerOpen])
+
+  useEffect(tellFrame, [tellFrame])
 
   /**
    * What the frame says is untrusted input, and arrives on a window every page
@@ -66,6 +84,7 @@ export function DraftPreview({ source, kind, onPointedAt }: DraftPreviewProps) {
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
       srcDoc={previewDocument}
+      onLoad={tellFrame}
     />
   )
 }

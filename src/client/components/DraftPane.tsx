@@ -22,10 +22,10 @@ import {
   setNotes,
   type NoteHandlers,
 } from '../notes/index.js'
-import { closeComposer, setEditing, setReattaching } from '../notes/state.js'
+import { closeComposer, composerField, openComposer, setEditing, setReattaching } from '../notes/state.js'
 import { previewKindFor } from '../preview/document.js'
 import type { PreviewMessage } from '../preview/frame.js'
-import { locateBlock } from '../preview/mapping.js'
+import { locateBlock, locatePhrase, type PreviewLocation } from '../preview/mapping.js'
 import { usePreviewMode } from '../preview/mode.js'
 import { DraftPreview } from './DraftPreview.js'
 
@@ -37,6 +37,19 @@ import { DraftPreview } from './DraftPreview.js'
  * — see `docs/adr/0003` — so this delay is the whole of the save interface.
  */
 const AUTOSAVE_IDLE_MS = 500
+
+/** What the toggle bar says while the reviewer is reading the Preview. */
+const PREVIEW_HINT = 'Click a passage to open it in the Source. Select one to leave a Note on it.'
+
+/**
+ * What the bar says when a gesture could not be pinned to the words it was
+ * about. Both leave the reviewer somewhere they can act rather than stuck: the
+ * first on the containing block, one drag away from the right Anchor; the
+ * second exactly where they were reading.
+ */
+const AMBIGUOUS_PHRASE =
+  'That phrase appears more than once in this block, so the whole block is selected. Narrow it, then press Add note.'
+const UNFINDABLE_TEXT = 'That text could not be found in the Source, so nothing has moved.'
 
 /** Light syntax highlighting per format. `.txt` gets none, by design. */
 function languageFor(extension: DraftExtension): Extension[] {
@@ -76,7 +89,7 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
    * to come back so it can be selected. An explicit target, so it overrides the
    * remembered scroll offset for that one switch.
    */
-  const pendingJump = useRef<{ from: number; to: number } | null>(null)
+  const pendingJump = useRef<{ from: number; to: number; compose: boolean } | null>(null)
 
   /**
    * The Draft as we last knew it on disk: what we read, or what we last wrote.
@@ -124,6 +137,21 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   // Read from effects that do not otherwise depend on the flag.
   const showingPreviewNow = useRef(false)
   showingPreviewNow.current = showingPreview
+
+  /**
+   * Why the last Preview gesture did not land where it was aimed, if it didn't.
+   * The toggle bar is where the reviewer is already looking, so it is where the
+   * explanation goes; it lasts until the next gesture or the next switch.
+   */
+  const [mappingNote, setMappingNote] = useState<string>()
+
+  /**
+   * Whether a composer is open in the Source view behind the Preview. The frame
+   * cannot see it, and its **Add note** button stands down while one is open —
+   * the same rule the Source view's own button follows. The Source view is
+   * hidden while the Preview is up, so this can only change on the way in.
+   */
+  const [composerOpen, setComposerOpen] = useState(false)
 
   // The extension is built once per view, so it reads the current callbacks
   // through a ref rather than closing over the render that created it.
@@ -374,10 +402,31 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   const onPointedAt = useCallback(
     (message: PreviewMessage) => {
       if (previewSource === undefined) return
-      const located = locateBlock(previewSource, message.block)
-      if (located.outcome === 'not-found') return
 
-      pendingJump.current = { from: located.from, to: located.to }
+      const located: PreviewLocation =
+        message.kind === 'click'
+          ? locateBlock(previewSource, message.block)
+          : locatePhrase(previewSource, message)
+
+      if (located.outcome === 'not-found') {
+        // Nothing moves. Switching to the Source and only then admitting
+        // failure would cost the reviewer the reading position this whole
+        // feature exists to protect.
+        setMappingNote(UNFINDABLE_TEXT)
+        return
+      }
+
+      // A selection asks for a Note, so it goes all the way to the composer —
+      // a button that says "Add note" should add one, not offer to. A click
+      // asks only to be taken there, and stops at the selection and the
+      // floating button. A phrase that could not be pinned lands on its block
+      // with the button rather than the composer, and says why.
+      const compose = message.kind === 'select' && located.outcome !== 'block'
+      setMappingNote(
+        message.kind === 'select' && located.outcome === 'block' ? AMBIGUOUS_PHRASE : undefined,
+      )
+
+      pendingJump.current = { from: located.from, to: located.to, compose }
       // Review-wide, so the next Draft opens in its Source too: "which view am
       // I in" stays one answer rather than one answer with exceptions.
       setPreviewing(false)
@@ -397,6 +446,8 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
    */
   useEffect(() => {
     if (!showingPreview) return
+    setMappingNote(undefined)
+    setComposerOpen(view.current?.state.field(composerField) !== null)
     void flush().finally(snapshotForPreview)
   }, [showingPreview, flush, snapshotForPreview])
 
@@ -428,9 +479,14 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
       // sidecar — and can narrow it before writing anything.
       editor.dispatch({
         selection: EditorSelection.single(from, to),
-        effects: EditorView.scrollIntoView(EditorSelection.range(from, to), { y: 'center' }),
+        effects: [
+          EditorView.scrollIntoView(EditorSelection.range(from, to), { y: 'center' }),
+          ...(jump.compose ? [openComposer.of({ from, to })] : []),
+        ],
       })
-      editor.focus()
+      // The composer focuses its own body as it is built, so focus is left
+      // alone when one is opening rather than taken back off it.
+      if (!jump.compose) editor.focus()
       return
     }
 
@@ -462,10 +518,14 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
               A plain text Draft has no rendered preview.
             </span>
           )}
-          {showingPreview && (
-            <span className="truncate text-[12px] text-[var(--review-dim)]">
-              Rendered preview — read-only. Notes are written in the source view.
+          {mappingNote ? (
+            <span role="status" className="truncate text-[12px] text-[#9a6700]">
+              {mappingNote}
             </span>
+          ) : (
+            showingPreview && (
+              <span className="truncate text-[12px] text-[var(--review-dim)]">{PREVIEW_HINT}</span>
+            )
           )}
         </div>
       )}
@@ -501,7 +561,12 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
         />
         {showingPreview && previewSource !== undefined && (
           <div className="absolute inset-0">
-            <DraftPreview source={previewSource} kind={previewKind} onPointedAt={onPointedAt} />
+            <DraftPreview
+              source={previewSource}
+              kind={previewKind}
+              composerOpen={composerOpen}
+              onPointedAt={onPointedAt}
+            />
           </div>
         )}
       </div>
