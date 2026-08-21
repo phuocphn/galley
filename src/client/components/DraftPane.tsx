@@ -95,6 +95,28 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   // Draft that has a preview.
   const showingPreview = previewing && previewKind !== null
 
+  /**
+   * The Source the Preview is rendering: a snapshot of the buffer, taken when
+   * the reviewer switched to the Preview — not the server's copy of the Draft.
+   *
+   * The server's copy diverges routinely (typing does not reach it until
+   * autosave fires, the file lands, the watcher notices and the client
+   * refetches) and completely while a conflict is unanswered, where it is the
+   * *agent's* version and the buffer is the reviewer's. Rendering it would show
+   * the reviewer a Draft that is not the one in front of them. The Source view
+   * is hidden while the Preview is up, so the buffer cannot move underneath the
+   * snapshot: the two are one coordinate space, which is what every offset cut
+   * from the Preview depends on. See `docs/adr/0005`.
+   *
+   * Undefined until the reviewer first asks for the Preview, so a Draft that is
+   * never previewed is never rendered.
+   */
+  const [previewSource, setPreviewSource] = useState<string>()
+
+  // Read from effects that do not otherwise depend on the flag.
+  const showingPreviewNow = useRef(false)
+  showingPreviewNow.current = showingPreview
+
   // The extension is built once per view, so it reads the current callbacks
   // through a ref rather than closing over the render that created it.
   const latest = useRef({ draftPath: draft.path, onNotesChanged, onReattached })
@@ -129,6 +151,16 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
     if (!editor || conflicted.current) return writing.current
     return write(latest.current.draftPath, editor.state.doc.toString())
   }, [stopIdleTimer, write])
+
+  /**
+   * Re-read the buffer into the Preview's snapshot. Called when the reviewer
+   * switches to the Preview, and again whenever the buffer moves under it —
+   * which, with the Source view hidden, only an agent's rewrite can do.
+   */
+  const snapshotForPreview = useCallback(() => {
+    const editor = view.current
+    if (editor && showingPreviewNow.current) setPreviewSource(editor.state.doc.toString())
+  }, [])
 
   /**
    * Typing schedules a write. The reviewer never asks for one: the Draft pane is
@@ -227,6 +259,8 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
     editor.dispatch({ effects: setNotes.of(draft.notes) })
     // A remembered scroll offset belongs to the Draft it was taken from.
     sourceScrollTop.current = 0
+    // As does a snapshot: this Draft has not been previewed yet.
+    setPreviewSource(undefined)
 
     return () => {
       // Moving to another Draft is not a reason to lose the last keystrokes.
@@ -280,13 +314,14 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
         changes: { from: 0, to: editor.state.doc.length, insert: draft.content },
         effects: setNotes.of(draft.notes),
       })
+      snapshotForPreview()
       return
     }
 
     // Both sides have written. Neither version is ours to throw away.
     stopIdleTimer()
     setConflict({ content: draft.content, notes: draft.notes })
-  }, [draft.content, draft.notes, stopIdleTimer])
+  }, [draft.content, draft.notes, snapshotForPreview, stopIdleTimer])
 
   const keepMine = useCallback(() => {
     const editor = view.current
@@ -305,17 +340,33 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
       changes: { from: 0, to: editor.state.doc.length, insert: conflict.content },
       effects: setNotes.of(conflict.notes),
     })
+    snapshotForPreview()
     // Dispatched while the conflict still stands, so autosave stays out of it.
     stopIdleTimer()
     setConflict(undefined)
     // The buffer that failed to save has just been discarded, so any earlier
     // "could not be written" complaint is about work that no longer exists.
     setSaveError(undefined)
-  }, [conflict, stopIdleTimer])
+  }, [conflict, snapshotForPreview, stopIdleTimer])
 
   useEffect(() => {
     view.current?.dispatch({ effects: setReattaching.of(reattaching ?? null) })
   }, [reattaching])
+
+  /**
+   * Switching to the Preview writes what has been typed, and then snapshots the
+   * buffer for it to render.
+   *
+   * The flush is what keeps disk saying what the reviewer is looking at, since
+   * the server cuts an Anchor out of the file rather than out of the snapshot.
+   * A flush that fails does not hold the Preview back — it renders the buffer
+   * either way, and a Note written from it then fails exactly as a Note written
+   * in the Source view already does.
+   */
+  useEffect(() => {
+    if (!showingPreview) return
+    void flush().finally(snapshotForPreview)
+  }, [showingPreview, flush, snapshotForPreview])
 
   /**
    * The source view is hidden, never unmounted, while the preview is up. Its
@@ -397,9 +448,9 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
           style={{ visibility: showingPreview ? 'hidden' : 'visible' }}
           data-testid="draft-pane"
         />
-        {showingPreview && (
+        {showingPreview && previewSource !== undefined && (
           <div className="absolute inset-0">
-            <DraftPreview content={draft.content} kind={previewKind} />
+            <DraftPreview source={previewSource} kind={previewKind} />
           </div>
         )}
       </div>
