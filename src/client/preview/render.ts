@@ -70,6 +70,16 @@ export function renderPreviewDocument(source: string, kind: PreviewKind): string
   // `locateRenderedText`, and `docs/adr/0005` for why that asymmetry stands.
   const sanitised = DOMPurify.sanitize(source, { WHOLE_DOCUMENT: true })
   const parsed = new DOMParser().parseFromString(sanitised, 'text/html')
+
+  // DOMPurify keeps `data-*` attributes, so a Draft that happens to carry a
+  // stamp of its own would arrive with one. The frame decides which mapping to
+  // use by whether the document it was handed is stamped at all, so leaving one
+  // in would quietly send this Draft down the Markdown path, where every
+  // gesture on it maps to nothing. Only the Markdown render gets to stamp.
+  for (const forged of parsed.body.querySelectorAll(`[${PREVIEW_BLOCK_ATTRIBUTE}]`)) {
+    forged.removeAttribute(PREVIEW_BLOCK_ATTRIBUTE)
+  }
+
   const headStyles = Array.from(parsed.head.querySelectorAll('style'), (style) => style.outerHTML)
   return buildPreviewDocument([...headStyles, parsed.body.innerHTML].join('\n'))
 }
