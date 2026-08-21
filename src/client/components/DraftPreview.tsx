@@ -3,8 +3,12 @@ import type { PreviewKind } from '../preview/document.js'
 import { renderPreviewDocument } from '../preview/render.js'
 
 interface DraftPreviewProps {
-  /** The Draft's source, exactly as the source view has it. */
-  content: string
+  /**
+   * The Source to render: a snapshot of the buffer the reviewer is looking at,
+   * taken by the Draft pane when they switched here. Deliberately not the
+   * server's copy of the Draft — see `docs/adr/0005`.
+   */
+  source: string
   kind: PreviewKind
 }
 
@@ -24,8 +28,8 @@ interface DraftPreviewProps {
  * Notes are neither shown nor created here. The preview is for reading; the
  * source view is where guidance gets attached.
  */
-export function DraftPreview({ content, kind }: DraftPreviewProps) {
-  const previewDocument = useMemo(() => renderPreviewDocument(content, kind), [content, kind])
+export function DraftPreview({ source, kind }: DraftPreviewProps) {
+  const previewDocument = useMemo(() => renderPreviewDocument(source, kind), [source, kind])
 
   return (
     <iframe
