@@ -1,5 +1,5 @@
 import { marked, type Token } from 'marked'
-import { locateAnchor } from '../../shared/anchor.js'
+import { CONTEXT_LENGTH, locateAnchor } from '../../shared/anchor.js'
 
 /**
  * Mapping a passage in the Preview back to the Source it was rendered from.
@@ -10,7 +10,9 @@ import { locateAnchor } from '../../shared/anchor.js'
  *
  * Markdown gives exact ranges: `marked`'s top-level tokens each carry their
  * `raw`, so accumulating them gives every rendered block its `[from, to)` in
- * the Source. See `docs/adr/0005`.
+ * the Source. HTML gives none — sanitising and parsing discard positions — so
+ * an HTML passage is found by searching the whole Source for the words that
+ * were rendered from it. See `docs/adr/0005`.
  */
 
 /**
@@ -25,6 +27,8 @@ import { locateAnchor } from '../../shared/anchor.js'
 export type PreviewLocation =
   | { outcome: 'exact'; from: number; to: number }
   | { outcome: 'reworded'; from: number; to: number }
+  // Markdown only: an HTML Preview has no blocks to fall back to, so it goes
+  // straight from `reworded` to `not-found`.
   | { outcome: 'block'; from: number; to: number }
   | { outcome: 'not-found' }
 
@@ -174,4 +178,65 @@ export function locatePhrase(source: string, selection: SelectedPhrase): Preview
     from: head.from,
     to: tail.to,
   }
+}
+
+/**
+ * A passage as the Preview rendered it: the words themselves, and the rendered
+ * text either side of them.
+ *
+ * The same shape the frame reports, restated here rather than imported, so this
+ * module goes on knowing nothing about frames or the messages they send — as
+ * `SelectedIn` above already does.
+ */
+export interface RenderedPassage {
+  text: string
+  before: string
+  after: string
+}
+
+/**
+ * Where rendered text came from in the Source, searched for across the whole of
+ * it.
+ *
+ * This is the HTML path, and the weakest thing in the design. A Markdown phrase
+ * is looked for inside one block whose range is exact, so the search space is a
+ * paragraph; here there are no blocks, because `DOMPurify.sanitize` and
+ * `DOMParser` both throw positions away, so the search space is the document.
+ * Rendered text is not Source text either, so anything spanning a tag goes
+ * through the matcher's fuzzy path with a whole file to be wrong in. Generated
+ * pages do usually carry their prose verbatim, which is why this works more
+ * often than not — but "more often than not" is the honest claim.
+ *
+ * The surrounding rendered text is passed as context, and only earns its keep
+ * when the same words appear twice: the matcher reads it to tell exact repeats
+ * apart. It usually fails to, because the Source characters at a passage's edge
+ * are a tag and the rendered ones are not. That failure is a refusal rather
+ * than a guess, which is the point of it.
+ *
+ * There is no block fallback, because there are no blocks to fall back to. The
+ * asymmetry with Markdown is recorded in `docs/adr/0005` and is not an omission:
+ * the alternative — pairing Source tags to rendered elements by document order —
+ * is correct right up until the sanitiser drops one element, after which every
+ * later pairing is off by one and the reviewer lands on the wrong paragraph with
+ * nothing to tell them so. `not-found` leaves them where they were reading,
+ * which costs them nothing.
+ */
+export function locateRenderedText(source: string, passage: RenderedPassage): PreviewLocation {
+  // Trimming the ends moves that whitespace into the context rather than
+  // dropping it, so `before` and `after` still abut the text they are context
+  // for.
+  const start = passage.text.length - passage.text.trimStart().length
+  const end = passage.text.trimEnd().length
+  if (end <= start) return { outcome: 'not-found' }
+
+  const located = locateAnchor(source, {
+    text: passage.text.slice(start, end),
+    before: (passage.before + passage.text.slice(0, start)).slice(-CONTEXT_LENGTH),
+    after: (passage.text.slice(end) + passage.after).slice(0, CONTEXT_LENGTH),
+    startLine: 1,
+    endLine: 1,
+  })
+  if (!located) return { outcome: 'not-found' }
+
+  return { outcome: located.match, from: located.from, to: located.to }
 }

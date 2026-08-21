@@ -63,6 +63,11 @@ export function renderPreviewDocument(source: string, kind: PreviewKind): string
   // than just its body keeps them, and they are then carried into the body of
   // the preview shell, where they still apply. Reparsing is inert: the markup
   // has already been through DOMPurify, and a parsed document is not a live one.
+  //
+  // Nothing here is stamped, because there is nothing to stamp it with: both
+  // the sanitiser and the parser discard positions. A gesture on this document
+  // is mapped back by searching the Source for the words that were rendered —
+  // `locateRenderedText`, and `docs/adr/0005` for why that asymmetry stands.
   const sanitised = DOMPurify.sanitize(source, { WHOLE_DOCUMENT: true })
   const parsed = new DOMParser().parseFromString(sanitised, 'text/html')
   const headStyles = Array.from(parsed.head.querySelectorAll('style'), (style) => style.outerHTML)

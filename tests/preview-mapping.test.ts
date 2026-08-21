@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { locateBlock, locatePhrase, markdownBlocks } from '../src/client/preview/mapping.js'
+import {
+  locateBlock,
+  locatePhrase,
+  locateRenderedText,
+  markdownBlocks,
+} from '../src/client/preview/mapping.js'
 
 /**
  * Mapping a passage in the Preview back to the Source it was rendered from.
@@ -209,5 +214,122 @@ describe('a phrase the reviewer selected in the Preview', () => {
 
   it('declines a whitespace-only phrase rather than anchoring to a gap', () => {
     expect(locatePhrase(PROSE, inBlock(1, '   ')).outcome).toBe('block')
+  })
+})
+
+const PAGE = `<!doctype html>
+<html lang="en">
+  <head>
+    <style>body { font-family: sans-serif }</style>
+  </head>
+  <body>
+    <h2>Get started</h2>
+    <p>Install the CLI, then point it at a folder of generated files.</p>
+    <p>Every plan is <em>billed monthly</em>, and you can cancel at any time.</p>
+    <h2>Get started</h2>
+    <p>That heading appears twice on purpose.</p>
+  </body>
+</html>
+`
+
+/**
+ * A passage as the frame would have reported it: the words the reviewer sees,
+ * and the rendered text either side of them.
+ *
+ * Written out rather than rendered, because rendering it needs a DOM and this
+ * needs none. What the frame reads off the page is its own business and is left
+ * to the running app; what the Source is searched for is this.
+ */
+function read(text: string, before = '', after = '') {
+  return { text, before, after }
+}
+
+/**
+ * An HTML Draft has no blocks — sanitising and parsing keep no positions — so
+ * both gestures come down to the same thing: find these rendered words in the
+ * Source, or say that you could not. There is deliberately no block fallback
+ * between those two answers; see `docs/adr/0005`.
+ */
+describe('a passage pointed at in an HTML Preview', () => {
+  it('maps text that appears once in the Source to exactly those characters', () => {
+    const located = locateRenderedText(
+      PAGE,
+      read('Install the CLI, then point it at a folder of generated files.'),
+    )
+    expect(located).toEqual({
+      outcome: 'exact',
+      from: PAGE.indexOf('Install the CLI'),
+      to: PAGE.indexOf('generated files.') + 'generated files.'.length,
+    })
+  })
+
+  it('maps a phrase whose rendered form differs from its Source form', () => {
+    // The Preview renders `<em>billed monthly</em>` as `billed monthly`, so the
+    // phrase the reviewer read is nowhere in the Source as they read it. The
+    // matcher's fuzzy path finds it anyway, and the Anchor covers the Source
+    // characters, tags included.
+    const phrase = 'billed monthly, and you can cancel at any time'
+    expect(PAGE).not.toContain(phrase)
+
+    const located = locateRenderedText(PAGE, read(phrase))
+    expect(located.outcome).toBe('reworded')
+    if (located.outcome === 'not-found') throw new Error('unreachable')
+
+    const anchor = PAGE.slice(located.from, located.to)
+    expect(anchor).toContain('billed monthly')
+    expect(anchor).toContain('</em>')
+    expect(anchor).toContain('cancel at any time')
+  })
+
+  it('says the text could not be found rather than landing somewhere near it', () => {
+    // No block to fall back to and nothing close enough to accept, so the
+    // reviewer stays in the Preview where they were reading.
+    expect(locateRenderedText(PAGE, read('This paragraph is nowhere in the page.'))).toEqual({
+      outcome: 'not-found',
+    })
+  })
+
+  it('refuses two candidates too close to call rather than guessing between them', () => {
+    // "Get started" is in the page twice, and the rendered text either side of
+    // it cannot separate them: the Source characters at the edge of a heading
+    // are a tag, and the rendered ones never are. A coin toss would put the
+    // Note on the wrong section with nothing to show for it.
+    const located = locateRenderedText(
+      PAGE,
+      read(
+        'Get started',
+        'Every plan is billed monthly, and you can cancel at any time.\n    ',
+        '\n    That heading appears twice on purpose.\n',
+      ),
+    )
+    expect(located).toEqual({ outcome: 'not-found' })
+  })
+
+  it('tells two copies apart when the rendered text around them does agree', () => {
+    // Where the repeats sit inside prose rather than inside their own tags, the
+    // rendered neighbours are the Source's neighbours, and the second copy is
+    // the one that was clicked rather than the first one that reads the same.
+    const repeats = `<body>
+  <p>Read the README. Get started. Then come back.</p>
+  <p>Once the folder is open: Get started. It only takes a minute.</p>
+</body>
+`
+    const second = repeats.indexOf('Get started', repeats.indexOf('Get started') + 1)
+
+    expect(
+      locateRenderedText(
+        repeats,
+        read('Get started', 'Once the folder is open: ', '. It only takes a minute.'),
+      ),
+    ).toEqual({ outcome: 'exact', from: second, to: second + 'Get started'.length })
+  })
+
+  it('declines a whitespace-only passage rather than anchoring to a gap', () => {
+    expect(locateRenderedText(PAGE, read('   \n  '))).toEqual({ outcome: 'not-found' })
+    expect(locateRenderedText(PAGE, read(''))).toEqual({ outcome: 'not-found' })
+  })
+
+  it('has nothing to offer for an empty Draft', () => {
+    expect(locateRenderedText('', read('anything at all'))).toEqual({ outcome: 'not-found' })
   })
 })

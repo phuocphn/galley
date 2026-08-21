@@ -23,9 +23,14 @@ import {
   type NoteHandlers,
 } from '../notes/index.js'
 import { closeComposer, composerField, openComposer, setEditing, setReattaching } from '../notes/state.js'
-import { previewKindFor } from '../preview/document.js'
-import type { PreviewGesture } from '../preview/frame.js'
-import { locateBlock, locatePhrase, type PreviewLocation } from '../preview/mapping.js'
+import { previewKindFor, type PreviewKind } from '../preview/document.js'
+import { asksForANote, type PreviewGesture } from '../preview/frame.js'
+import {
+  locateBlock,
+  locatePhrase,
+  locateRenderedText,
+  type PreviewLocation,
+} from '../preview/mapping.js'
 import { usePreviewMode } from '../preview/mode.js'
 import { DraftPreview } from './DraftPreview.js'
 
@@ -50,6 +55,29 @@ const PREVIEW_HINT = 'Click a passage to open it in the Source. Select one to le
 const AMBIGUOUS_PHRASE =
   'That phrase appears more than once in this block, so the whole block is selected. Narrow it, then press Add note.'
 const UNFINDABLE_TEXT = 'That text could not be found in the Source, so nothing has moved.'
+
+/**
+ * Where a Preview gesture landed in the Source.
+ *
+ * Which mapping it goes through is decided by the Draft's format, not by the
+ * shape of the message: a Markdown Preview stamps every block as it renders it
+ * and looks the range straight up, while an HTML Preview stamps nothing —
+ * sanitising and parsing keep no positions — and has to find the rendered words
+ * in the Source (`docs/adr/0005`). The frame sends the shape that matches what
+ * it was handed, so a message of the other shape is not one we sent, and maps
+ * to nothing.
+ */
+function locatedBy(kind: PreviewKind, source: string, gesture: PreviewGesture): PreviewLocation {
+  if (kind === 'html') {
+    return gesture.kind === 'text'
+      ? locateRenderedText(source, gesture.passage)
+      : { outcome: 'not-found' }
+  }
+
+  if (gesture.kind === 'click') return locateBlock(source, gesture.block)
+  if (gesture.kind === 'select') return locatePhrase(source, gesture)
+  return { outcome: 'not-found' }
+}
 
 /** Light syntax highlighting per format. `.txt` gets none, by design. */
 function languageFor(extension: DraftExtension): Extension[] {
@@ -401,17 +429,16 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
    */
   const onPointedAt = useCallback(
     (message: PreviewGesture) => {
-      if (previewSource === undefined) return
+      if (previewSource === undefined || previewKind === null) return
 
-      const located: PreviewLocation =
-        message.kind === 'click'
-          ? locateBlock(previewSource, message.block)
-          : locatePhrase(previewSource, message)
+      const located: PreviewLocation = locatedBy(previewKind, previewSource, message)
 
       if (located.outcome === 'not-found') {
-        // Nothing moves. Switching to the Source and only then admitting
-        // failure would cost the reviewer the reading position this whole
-        // feature exists to protect.
+        // Nothing moves, and in particular the view does not change: switching
+        // to the Source and only then admitting failure would cost the reviewer
+        // the reading position this whole feature exists to protect. For an
+        // HTML Draft this is the only way a mapping can fail, so it is the one
+        // that has to be inert.
         setMappingNote(UNFINDABLE_TEXT)
         return
       }
@@ -420,18 +447,18 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
       // a button that says "Add note" should add one, not offer to. A click
       // asks only to be taken there, and stops at the selection and the
       // floating button. A phrase that could not be pinned lands on its block
-      // with the button rather than the composer, and says why.
-      const compose = message.kind === 'select' && located.outcome !== 'block'
-      setMappingNote(
-        message.kind === 'select' && located.outcome === 'block' ? AMBIGUOUS_PHRASE : undefined,
-      )
+      // with the button rather than the composer, and says why; that can only
+      // happen for a Markdown Draft, since only Markdown has blocks.
+      const wantsANote = asksForANote(message)
+      const compose = wantsANote && located.outcome !== 'block'
+      setMappingNote(wantsANote && located.outcome === 'block' ? AMBIGUOUS_PHRASE : undefined)
 
       pendingJump.current = { from: located.from, to: located.to, compose }
       // Review-wide, so the next Draft opens in its Source too: "which view am
       // I in" stays one answer rather than one answer with exceptions.
       setPreviewing(false)
     },
-    [previewSource, setPreviewing],
+    [previewKind, previewSource, setPreviewing],
   )
 
   /**

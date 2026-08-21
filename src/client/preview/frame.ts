@@ -13,6 +13,8 @@
  * context that shares nothing with this one.
  */
 
+import { CONTEXT_LENGTH } from '../../shared/anchor.js'
+
 /** Where a rendered block's `[from, to)` in the Source is stamped. */
 export const PREVIEW_BLOCK_ATTRIBUTE = 'data-galley-block'
 
@@ -28,6 +30,27 @@ export interface PreviewClick {
   kind: 'click'
   /** The stamped block the click landed in. */
   block: number
+}
+
+/**
+ * A passage as the frame read it off the page: the words themselves, and the
+ * rendered text either side of them.
+ *
+ * What a Preview that stamps no blocks has to send instead of an index. An HTML
+ * Draft is sanitised and parsed before it is rendered and both throw positions
+ * away, so there is no range to stamp and nothing to look up — the app has to
+ * find these words in the Source (`docs/adr/0005`).
+ *
+ * The neighbouring text is here to tell repeats apart, and is worth less than
+ * it looks: it is rendered text, so where the Source has a tag at the boundary
+ * — which is most of the time — it agrees with nothing. When it cannot separate
+ * two candidates the matcher declines, which is the intended outcome rather
+ * than a shortfall.
+ */
+export interface RenderedPassage {
+  text: string
+  before: string
+  after: string
 }
 
 /** Which block a selection ran into, and the text of it that was selected. */
@@ -59,8 +82,33 @@ export interface PreviewScrolled {
   top: number
 }
 
+/**
+ * Either gesture, made on a Preview that stamps no blocks.
+ *
+ * One message for both, because on an unstamped document they can only say the
+ * same thing: a click reports the text of the block it landed in, a selection
+ * the text that was selected, and neither has an index or a block to name. The
+ * gesture is still carried, because the two mean what they always mean — a
+ * click asks to be taken there, a selection asks for a Note.
+ */
+export interface PreviewText {
+  kind: 'text'
+  gesture: 'click' | 'select'
+  passage: RenderedPassage
+}
+
 /** A gesture: the reviewer pointing at a passage, either way of pointing. */
-export type PreviewGesture = PreviewClick | PreviewSelect
+export type PreviewGesture = PreviewClick | PreviewSelect | PreviewText
+
+/**
+ * Whether a gesture was the one that asks for a Note.
+ *
+ * Asked of the gesture rather than of the message kind, so that the answer does
+ * not depend on whether the Draft's Preview happened to stamp its blocks.
+ */
+export function asksForANote(gesture: PreviewGesture): boolean {
+  return gesture.kind === 'select' || (gesture.kind === 'text' && gesture.gesture === 'select')
+}
 
 /** Everything the Preview frame can say. */
 export type PreviewMessage = PreviewGesture | PreviewScrolled
@@ -74,6 +122,18 @@ function asSelectedIn(value: unknown): SelectedIn | null {
   if (!Number.isInteger(end.block) || (end.block as number) < 0) return null
   if (typeof end.text !== 'string' || end.text.length > LONGEST_PHRASE) return null
   return { block: end.block as number, text: end.text }
+}
+
+function asRenderedPassage(value: unknown): RenderedPassage | null {
+  if (typeof value !== 'object' || value === null) return null
+  const passage = value as Record<string, unknown>
+  if (typeof passage.text !== 'string' || passage.text.length > LONGEST_PHRASE) return null
+  // Context longer than the matcher reads is not context, so it is refused
+  // rather than trimmed: the only sender is our own script, which sends exactly
+  // this much, and anything else is not something to accommodate.
+  if (typeof passage.before !== 'string' || passage.before.length > CONTEXT_LENGTH) return null
+  if (typeof passage.after !== 'string' || passage.after.length > CONTEXT_LENGTH) return null
+  return { text: passage.text, before: passage.before, after: passage.after }
 }
 
 /**
@@ -95,6 +155,11 @@ export function asPreviewMessage(data: unknown): PreviewMessage | null {
     const start = asSelectedIn(message.start)
     const end = asSelectedIn(message.end)
     return start && end ? { kind: 'select', start, end } : null
+  }
+
+  if (message.kind === 'text' && (message.gesture === 'click' || message.gesture === 'select')) {
+    const passage = asRenderedPassage(message.passage)
+    return passage ? { kind: 'text', gesture: message.gesture, passage } : null
   }
 
   if (message.kind === 'scrolled' && typeof message.top === 'number' && message.top >= 0) {
@@ -147,14 +212,42 @@ export function restoreReadingMessage(top: number): unknown {
  *
  * A drag that selects text ends in a click event too, so a click only counts as
  * a click when it left nothing selected.
+ *
+ * Both gestures work on a document that stamps no blocks — an HTML Draft, whose
+ * markup went through a sanitiser and a parser that keep no positions. There
+ * the script reports the rendered text and its neighbours instead of an index,
+ * and the app goes looking for it in the Source. Which of the two it does is
+ * decided once, by whether the document it was handed carries any stamp at all,
+ * so a click on the margin of a Markdown Preview stays the no-op it has always
+ * been rather than becoming a document-wide search for nothing.
  */
 export const PREVIEW_FRAME_SCRIPT = `
 (function () {
   var BLOCK = '${PREVIEW_BLOCK_ATTRIBUTE}';
   var LIFT = 4;
+  var CONTEXT = ${CONTEXT_LENGTH};
+
+  // What counts as a passage on an unstamped page: the nearest ancestor that
+  // reads as one block of prose. \`closest\` walks outwards, so the tightest of
+  // these wins and the wrappers are only reached when nothing better is there.
+  // \`body\` is deliberately absent — a click on the page margin is not a click
+  // on a passage, and answering it with the whole document's text would trade a
+  // no-op for a search that says the text could not be found.
+  var PASSAGES = 'p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, dt, dd, td, th,' +
+    ' caption, figcaption, summary, div, section, article, aside, main, header, footer, nav';
+
+  // Whether this document has stamped blocks to point at, which is the same
+  // question as whether the Draft is Markdown — decided from the document
+  // rather than told to us, because the document is the thing being read.
+  var stamps = document.querySelector('[' + BLOCK + ']') !== null;
 
   var composerOpen = false;
   var addNote = null;
+
+  function send(message) {
+    message.galley = '${PREVIEW_MESSAGE}';
+    parent.postMessage(message, '*');
+  }
 
   function blockAt(target) {
     var node = target && target.nodeType === 1 ? target : target && target.parentElement;
@@ -178,6 +271,58 @@ export const PREVIEW_FRAME_SCRIPT = `
     return { block: block.index, text: clipped.toString() };
   }
 
+  /** The range covering the passage a point on an unstamped page falls in. */
+  function passageAt(target) {
+    var node = target && target.nodeType === 1 ? target : target && target.parentElement;
+    var element = node && node.closest ? node.closest(PASSAGES) : null;
+    if (!element || element.textContent.trim() === '') return null;
+    var range = document.createRange();
+    range.selectNodeContents(element);
+    return range;
+  }
+
+  /**
+   * The rendered text either side of a range, as much of it as the matcher will
+   * read.
+   *
+   * Walked over text nodes rather than taken from a Range's own toString,
+   * because not every text node on this page was ever text to read: an HTML
+   * Draft's <style> blocks are carried into the body so that they still apply,
+   * this script is a text node at the end of it, and the **Add note** button is
+   * one we put there ourselves. Handing any of them to the matcher as context
+   * would be handing it noise.
+   */
+  function contextAround(range) {
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        var parent = node.parentElement;
+        if (!parent || parent.closest('style, script')) return NodeFilter.FILTER_REJECT;
+        if (addNote && addNote.contains(parent)) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+
+    var before = '';
+    var after = '';
+    var node;
+    while ((node = walker.nextNode()) && after.length < CONTEXT) {
+      var text = node.data;
+      // A node the range starts or ends inside contributes only its outer part.
+      if (node === range.startContainer) before = (before + text.slice(0, range.startOffset)).slice(-CONTEXT);
+      if (node === range.endContainer) after += text.slice(range.endOffset);
+      else if (range.comparePoint(node, text.length) < 0) before = (before + text).slice(-CONTEXT);
+      else if (range.comparePoint(node, 0) > 0) after += text;
+    }
+
+    return { before: before, after: after.slice(0, CONTEXT) };
+  }
+
+  /** A range as the words in it plus the words around them. */
+  function passageOf(range) {
+    var context = contextAround(range);
+    return { text: range.toString(), before: context.before, after: context.after };
+  }
+
   function selected() {
     if (composerOpen) return null;
     var selection = document.getSelection();
@@ -186,14 +331,28 @@ export const PREVIEW_FRAME_SCRIPT = `
     var range = selection.getRangeAt(0);
     if (range.toString().trim() === '') return null;
 
+    if (!stamps) return { range: range, first: null, last: null };
+
     var first = blockAt(range.startContainer);
     var last = blockAt(range.endContainer);
     if (!first || !last) return null;
 
+    return { range: range, first: first, last: last };
+  }
+
+  /**
+   * What to say about a selection. Built after the **Add note** button has been
+   * taken back off the page, because the button is in the body and its own
+   * label would otherwise be read as the text following the selection.
+   */
+  function selectionMessage(target) {
+    if (!target.first || !target.last) {
+      return { kind: 'text', gesture: 'select', passage: passageOf(target.range) };
+    }
     return {
-      range: range,
-      start: selectedIn(range, first),
-      end: selectedIn(range, last)
+      kind: 'select',
+      start: selectedIn(target.range, target.first),
+      end: selectedIn(target.range, target.last)
     };
   }
 
@@ -236,10 +395,7 @@ export const PREVIEW_FRAME_SCRIPT = `
       var target = selected();
       if (!target) return;
       hideAddNote();
-      parent.postMessage(
-        { galley: '${PREVIEW_MESSAGE}', kind: 'select', start: target.start, end: target.end },
-        '*'
-      );
+      send(selectionMessage(target));
     });
     return node;
   }
@@ -267,7 +423,7 @@ export const PREVIEW_FRAME_SCRIPT = `
     if (reporting) return;
     reporting = requestAnimationFrame(function () {
       reporting = 0;
-      parent.postMessage({ galley: '${PREVIEW_MESSAGE}', kind: 'scrolled', top: window.scrollY }, '*');
+      send({ kind: 'scrolled', top: window.scrollY });
     });
   });
 
@@ -283,9 +439,16 @@ export const PREVIEW_FRAME_SCRIPT = `
     var selection = document.getSelection();
     if (selection && !selection.isCollapsed) return;
 
-    var block = blockAt(event.target);
-    if (!block) return;
-    parent.postMessage({ galley: '${PREVIEW_MESSAGE}', kind: 'click', block: block.index }, '*');
+    if (stamps) {
+      var block = blockAt(event.target);
+      if (!block) return;
+      send({ kind: 'click', block: block.index });
+      return;
+    }
+
+    var range = passageAt(event.target);
+    if (!range) return;
+    send({ kind: 'text', gesture: 'click', passage: passageOf(range) });
   });
 
   window.addEventListener('message', function (event) {

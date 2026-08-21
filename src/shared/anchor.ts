@@ -9,8 +9,14 @@
  */
 import type { Anchor } from './types.js'
 
-/** How much text either side of the anchor is kept to tell repeats apart. */
-const CONTEXT_LENGTH = 160
+/**
+ * How much text either side of the anchor is kept to tell repeats apart.
+ *
+ * Exported because the Preview frame reports rendered context for an HTML
+ * Draft, and context the matcher never reads is bytes over `postMessage` for
+ * nothing.
+ */
+export const CONTEXT_LENGTH = 160
 
 /** Below this similarity a reworded passage is a different passage. */
 const REWORD_THRESHOLD = 0.72
