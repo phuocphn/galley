@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { locateBlock, markdownBlocks } from '../src/client/preview/mapping.js'
+import { locateBlock, locatePhrase, markdownBlocks } from '../src/client/preview/mapping.js'
 
 /**
  * Mapping a passage in the Preview back to the Source it was rendered from.
@@ -115,5 +115,99 @@ describe('a block the reviewer clicked in the Preview', () => {
 
   it('reports a block outcome, which the caller must not read as an exact one', () => {
     expect(locateBlock(DRAFT, 1).outcome).toBe('block')
+  })
+})
+
+/** A selection the reviewer made inside one rendered block. */
+function inBlock(block: number, text: string) {
+  return { start: { block, text }, end: { block, text } }
+}
+
+const PROSE = `## Pricing
+
+Every plan is **billed monthly**, and you can cancel at any time.
+
+The Pro plan adds [priority support](https://example.com/support) and
+\`unlimited\` exports. The Pro plan adds nothing else.
+
+Cancel at any time.
+`
+
+/** What a located phrase actually covers in the Source. */
+function anchored(source: string, selection: Parameters<typeof locatePhrase>[1]): string {
+  const located = locatePhrase(source, selection)
+  if (located.outcome === 'not-found') throw new Error('the phrase was not located')
+  return source.slice(located.from, located.to)
+}
+
+describe('a phrase the reviewer selected in the Preview', () => {
+  it('anchors to those characters, not to the block containing them', () => {
+    expect(anchored(PROSE, inBlock(1, 'you can cancel at any time'))).toBe(
+      'you can cancel at any time',
+    )
+    expect(locatePhrase(PROSE, inBlock(1, 'you can cancel at any time')).outcome).toBe('exact')
+  })
+
+  it('maps a phrase spanning bold, which the Source does not contain verbatim', () => {
+    // The Preview renders `**billed monthly**` as `billed monthly`, so a phrase
+    // running across the emphasis is nowhere in the Source as the reviewer read
+    // it. The matcher's fuzzy path finds it anyway, and the Anchor covers the
+    // Source characters, syntax included.
+    const selection = inBlock(1, 'plan is billed monthly, and you')
+    expect(PROSE).not.toContain('plan is billed monthly, and you')
+
+    // `reworded` rather than `exact`, which is the honest answer: the window
+    // the matcher settles on is close to the phrase rather than equal to it,
+    // and the reviewer sees it selected on arrival and can narrow it.
+    expect(locatePhrase(PROSE, selection).outcome).toBe('reworded')
+    expect(anchored(PROSE, selection)).toContain('**billed monthly**')
+  })
+
+  it('maps a phrase spanning a link', () => {
+    expect(anchored(PROSE, inBlock(2, 'priority support'))).toContain('priority support')
+  })
+
+  it('maps a phrase spanning inline code', () => {
+    expect(anchored(PROSE, inBlock(2, 'unlimited exports'))).toContain('unlimited')
+  })
+
+  it('falls back to the containing block when the phrase repeats inside it', () => {
+    // Two candidates in one paragraph is a coin toss. The reviewer lands on the
+    // paragraph and narrows it, rather than on whichever one we guessed.
+    const located = locatePhrase(PROSE, inBlock(2, 'The Pro plan adds'))
+    expect(located.outcome).toBe('block')
+    if (located.outcome === 'not-found') throw new Error('unreachable')
+    expect(PROSE.slice(located.from, located.to)).toContain('unlimited')
+  })
+
+  it('spans from the start phrase in the first block to the end phrase in the last', () => {
+    const located = locatePhrase(PROSE, {
+      start: { block: 1, text: 'you can cancel' },
+      end: { block: 2, text: 'priority support' },
+    })
+    if (located.outcome === 'not-found') throw new Error('unreachable')
+
+    const anchor = PROSE.slice(located.from, located.to)
+    expect(anchor.startsWith('you can cancel')).toBe(true)
+    expect(anchor.endsWith('priority support')).toBe(true)
+    // Everything between, including syntax that was never visible in the
+    // Preview — the same as a selection made in the Source view.
+    expect(anchor).toContain('The Pro plan adds [')
+  })
+
+  it('takes the whole span when a cross-block end cannot be pinned', () => {
+    const located = locatePhrase(PROSE, {
+      start: { block: 1, text: 'you can cancel' },
+      end: { block: 2, text: 'The Pro plan adds' },
+    })
+    expect(located.outcome).toBe('block')
+  })
+
+  it('declines a selection that names no block of this Draft', () => {
+    expect(locatePhrase(PROSE, inBlock(99, 'anything'))).toEqual({ outcome: 'not-found' })
+  })
+
+  it('declines a whitespace-only phrase rather than anchoring to a gap', () => {
+    expect(locatePhrase(PROSE, inBlock(1, '   ')).outcome).toBe('block')
   })
 })

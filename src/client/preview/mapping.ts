@@ -1,4 +1,5 @@
 import { marked, type Token } from 'marked'
+import { locateAnchor } from '../../shared/anchor.js'
 
 /**
  * Mapping a passage in the Preview back to the Source it was rendered from.
@@ -87,4 +88,90 @@ export function locateBlock(source: string, block: number): PreviewLocation {
   const found = markdownBlocks(source)[block]
   if (!found) return { outcome: 'not-found' }
   return { outcome: 'block', from: found.from, to: found.to }
+}
+
+/** One end of a selection: the block it ran into, and the text selected there. */
+export interface SelectedIn {
+  block: number
+  text: string
+}
+
+/** A phrase the reviewer selected in the Preview, as the frame reported it. */
+export interface SelectedPhrase {
+  start: SelectedIn
+  end: SelectedIn
+}
+
+/** A phrase found inside one block, in the Source's own coordinates. */
+interface FoundInBlock {
+  from: number
+  to: number
+  match: 'exact' | 'reworded'
+}
+
+/**
+ * Find rendered text inside one block's slice of the Source.
+ *
+ * Rendered text is not Source text — `**billed monthly**` renders as `billed
+ * monthly` — so a phrase spanning bold, a link or inline code has to go through
+ * the matcher's fuzzy path. Scoped to one block that is safe: the block range
+ * is exact, so the search space is a paragraph rather than a document.
+ *
+ * The matcher is given no surrounding context, which is deliberate. A phrase
+ * that appears twice inside its own block is then a coin toss the matcher
+ * declines to call, and the caller falls back to the block — where the reviewer
+ * can narrow the selection by hand, having been told why.
+ */
+function within(source: string, block: SourceBlock, text: string): FoundInBlock | null {
+  const phrase = text.trim()
+  if (phrase === '') return null
+
+  const located = locateAnchor(source.slice(block.from, block.to), {
+    text: phrase,
+    before: '',
+    after: '',
+    startLine: 1,
+    endLine: 1,
+  })
+  if (!located) return null
+
+  return { from: block.from + located.from, to: block.from + located.to, match: located.match }
+}
+
+/**
+ * Where the phrase the reviewer selected came from in the Source.
+ *
+ * A selection may run across blocks, and is allowed to: the start phrase is
+ * located in the first block and the end phrase in the last, and the Anchor
+ * covers everything between — including syntax that was never visible in the
+ * Preview. That matches the Source view, where a selection may span anything,
+ * and the range shown on arrival makes an over-wide span visible at once.
+ * Clamping to the first block is the silent-wrong-answer failure this design
+ * refuses everywhere else.
+ *
+ * When a phrase cannot be pinned the containing block is returned instead,
+ * which is always exact. The caller shows that as a selection to narrow rather
+ * than as a Note to write.
+ */
+export function locatePhrase(source: string, selection: SelectedPhrase): PreviewLocation {
+  const blocks = markdownBlocks(source)
+  const first = blocks[selection.start.block]
+  const last = blocks[selection.end.block]
+  if (!first || !last || last.to < first.from) return { outcome: 'not-found' }
+
+  const head = within(source, first, selection.start.text)
+
+  if (selection.start.block === selection.end.block) {
+    if (!head) return { outcome: 'block', from: first.from, to: first.to }
+    return { outcome: head.match, from: head.from, to: head.to }
+  }
+
+  const tail = within(source, last, selection.end.text)
+  if (!head || !tail) return { outcome: 'block', from: first.from, to: last.to }
+
+  return {
+    outcome: head.match === 'exact' && tail.match === 'exact' ? 'exact' : 'reworded',
+    from: head.from,
+    to: tail.to,
+  }
 }
