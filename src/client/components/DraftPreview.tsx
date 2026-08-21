@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { PreviewKind } from '../preview/document.js'
-import { asPreviewMessage, composerStateMessage, type PreviewMessage } from '../preview/frame.js'
+import {
+  asPreviewMessage,
+  composerStateMessage,
+  restoreReadingMessage,
+  type PreviewGesture,
+} from '../preview/frame.js'
 import { renderPreviewDocument } from '../preview/render.js'
 
 interface DraftPreviewProps {
@@ -18,7 +23,7 @@ interface DraftPreviewProps {
    */
   composerOpen: boolean
   /** Called when the reviewer points at something in the rendered Draft. */
-  onPointedAt: (message: PreviewMessage) => void
+  onPointedAt: (gesture: PreviewGesture) => void
 }
 
 /**
@@ -42,14 +47,35 @@ interface DraftPreviewProps {
  */
 export function DraftPreview({ source, kind, composerOpen, onPointedAt }: DraftPreviewProps) {
   const frame = useRef<HTMLIFrameElement>(null)
+  /**
+   * Where the reviewer had read to, kept across a document swap.
+   *
+   * It lives in this component, so it is discarded when the pane moves to
+   * another Draft — which is already true of the Source view's own offset.
+   */
+  const readingTop = useRef(0)
+
+  /**
+   * The rendered document, memoised on the snapshot text.
+   *
+   * A round trip that left the Draft alone — read, jump to the Source, write a
+   * Note, come back — produces a character-identical snapshot, so this does not
+   * rebuild, the frame is never handed a new document, and the reading position
+   * is untouched rather than restored. That is the common case working for
+   * free, and it is why the nonce being fresh per render costs nothing here.
+   */
   const previewDocument = useMemo(() => renderPreviewDocument(source, kind), [source, kind])
 
   /**
-   * Tell the frame whether a composer is open. Sent on load as well as on
-   * change, because a frame that has just swapped documents has forgotten.
+   * Tell the frame whether a composer is open, and put it back where the
+   * reviewer was reading. Sent on load as well as on change, because a frame
+   * that has just swapped documents has forgotten both.
    */
   const tellFrame = useCallback(() => {
-    frame.current?.contentWindow?.postMessage(composerStateMessage(composerOpen), '*')
+    const window = frame.current?.contentWindow
+    if (!window) return
+    window.postMessage(composerStateMessage(composerOpen), '*')
+    if (readingTop.current > 0) window.postMessage(restoreReadingMessage(readingTop.current), '*')
   }, [composerOpen])
 
   useEffect(tellFrame, [tellFrame])
@@ -65,7 +91,14 @@ export function DraftPreview({ source, kind, composerOpen, onPointedAt }: DraftP
     function receive(event: MessageEvent): void {
       if (!frame.current || event.source !== frame.current.contentWindow) return
       const message = asPreviewMessage(event.data)
-      if (message) onPointedAt(message)
+      if (!message) return
+
+      // Where they have read to is this component's business, not the pane's.
+      if (message.kind === 'scrolled') {
+        readingTop.current = message.top
+        return
+      }
+      onPointedAt(message)
     }
 
     window.addEventListener('message', receive)
