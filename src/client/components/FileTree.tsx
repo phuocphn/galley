@@ -72,8 +72,8 @@ export function FileTree({ drafts, selectedPath, onSelect }: FileTreeProps) {
   if (drafts.length === 0) {
     return (
       <p className="px-4 py-3 text-[13px] leading-relaxed text-[var(--review-dim)]">
-        No Drafts here. This Review has no <code>.md</code>, <code>.html</code>, or{' '}
-        <code>.txt</code> files.
+        No Drafts here. This Review has no <code>.md</code>, <code>.html</code>,{' '}
+        <code>.txt</code>, <code>.tex</code>, or <code>.bib</code> files.
       </p>
     )
   }

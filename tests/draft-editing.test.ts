@@ -97,6 +97,26 @@ describe('writing a Draft back', () => {
     expect(await fixture.read('release notes.md')).toBe('shipped, eventually')
   })
 
+  // A LaTeX Draft has no Preview (`docs/adr/0006`), but it is a Draft in every
+  // other way: read, edited, written back, and Noted on.
+  it('writes a LaTeX Draft, and the bibliography beside it', async () => {
+    fixture = await createReviewFixture({
+      'paper.tex': '\\section{Method}\n\nWe proceed greedily.\n',
+      'refs.bib': '@article{key, title = {A Paper}}\n',
+    })
+
+    await fixture.request(
+      draftUrl('paper.tex'),
+      saving('\\section{Method}\n\nWe proceed greedily, and say why.\n'),
+    )
+    await fixture.request(draftUrl('refs.bib'), saving('@article{key, title = {A Better Paper}}\n'))
+
+    expect(await fixture.read('paper.tex')).toBe(
+      '\\section{Method}\n\nWe proceed greedily, and say why.\n',
+    )
+    expect(await fixture.read('refs.bib')).toBe('@article{key, title = {A Better Paper}}\n')
+  })
+
   it('writes an empty Draft rather than treating it as nothing to say', async () => {
     fixture = await createReviewFixture({ 'findings.md': DRAFT })
 
@@ -229,6 +249,32 @@ describe('a Note’s Anchor after the reviewer edits the Draft', () => {
     expect(reread.content.slice(reread.notes[0]!.range!.from, reread.notes[0]!.range!.to)).toBe(
       PHRASE,
     )
+  })
+
+  // Anchors are text, not line numbers (`docs/adr/0002`), so a format galley
+  // cannot render is still a format it can attach a Note to.
+  it('holds inside a LaTeX Draft, through markup the Preview never sees', async () => {
+    const paper = '\\section{Evaluation}\n\nLatency improved by 40\\% on average.\n'
+    const claim = 'Latency improved by 40\\%'
+    fixture = await createReviewFixture({ 'paper.tex': paper })
+
+    const from = paper.indexOf(claim)
+    await fixture.getJson<Note>('/api/notes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        draftPath: 'paper.tex',
+        from,
+        to: from + claim.length,
+        body: 'Averaged over what? Give the spread.',
+      }),
+    })
+
+    const edited = paper.replace('\\section{Evaluation}', '\\section{Evaluation}\\label{sec:eval}')
+    const saved = await fixture.getJson<DraftContents>(draftUrl('paper.tex'), saving(edited))
+
+    expect(saved.notes[0]!.match).toBe('exact')
+    expect(saved.content.slice(saved.notes[0]!.range!.from, saved.notes[0]!.range!.to)).toBe(claim)
   })
 
   it('follows the edited words when the reviewer rewrites inside the Anchor', async () => {

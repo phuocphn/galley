@@ -18,6 +18,8 @@ describe('listing a Review', () => {
       'guides/setup.md': '# Setup',
       'guides/deep/advanced.html': '<h1>Advanced</h1>',
       'notes.txt': 'plain',
+      'paper.tex': '\\section{Method}',
+      'refs.bib': '@article{key, title = {A Paper}}',
     })
 
     const review = await fixture.getJson<ReviewListing>('/api/review')
@@ -27,6 +29,8 @@ describe('listing a Review', () => {
       'guides/setup.md',
       'intro.md',
       'notes.txt',
+      'paper.tex',
+      'refs.bib',
     ])
     expect(review.root).toBe(fixture.root)
   })

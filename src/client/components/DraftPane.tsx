@@ -1,7 +1,8 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { html } from '@codemirror/lang-html'
 import { markdown } from '@codemirror/lang-markdown'
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { StreamLanguage, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { stex } from '@codemirror/legacy-modes/mode/stex'
 import { EditorSelection, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -81,14 +82,24 @@ function locatedBy(kind: PreviewKind, source: string, gesture: PreviewGesture): 
   return { outcome: 'not-found' }
 }
 
-/** Light syntax highlighting per format. `.txt` gets none, by design. */
+/**
+ * Light syntax highlighting per format.
+ *
+ * `.txt` gets none, by design: it is prose, not markup, and there is nothing to
+ * pick out. `.bib` gets none for a duller reason — there is no BibTeX mode to
+ * hand. `.tex` gets one because it needs it most: it is dense markup with no
+ * Preview to escape to, so the Source is the only view it is ever read in.
+ */
 function languageFor(extension: DraftExtension): Extension[] {
   switch (extension) {
     case '.md':
       return [markdown()]
     case '.html':
       return [html()]
+    case '.tex':
+      return [StreamLanguage.define(stex)]
     case '.txt':
+    case '.bib':
       return []
   }
 }
@@ -164,9 +175,9 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
 
   const [previewing, setPreviewing] = usePreviewMode()
   const previewKind = previewKindFor(draft.extension)
-  // The flag outlives any one Draft, so a `.txt` Draft simply shows its source
-  // while the reviewer is in preview mode, and rendering resumes on the next
-  // Draft that has a preview.
+  // The flag outlives any one Draft, so a Draft with no preview — `.txt`,
+  // `.tex`, `.bib` — simply shows its source while the reviewer is in preview
+  // mode, and rendering resumes on the next Draft that has one.
   const showingPreview = previewing && previewKind !== null
   /**
    * Whether the two views can be kept on the same passage at all. Only Markdown
@@ -656,8 +667,8 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
 
   return (
     <div className="flex h-full flex-col">
-      {/* A `.txt` Draft gets no toggle. It still gets the bar while preview mode
-          is on, so the toggle looks explained rather than missing. */}
+      {/* A Draft with no preview gets no toggle. It still gets the bar while
+          preview mode is on, so the toggle looks explained rather than missing. */}
       {(previewKind || previewing) && (
         <div className="flex h-9 shrink-0 items-center gap-3 border-b border-[var(--review-border)] px-3">
           {previewKind ? (
