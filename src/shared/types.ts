@@ -1,5 +1,5 @@
 /** The formats a Draft can be. */
-export const DRAFT_EXTENSIONS = ['.md', '.html', '.txt'] as const
+export const DRAFT_EXTENSIONS = ['.md', '.html', '.txt', '.tex', '.bib'] as const
 
 export type DraftExtension = (typeof DRAFT_EXTENSIONS)[number]
 

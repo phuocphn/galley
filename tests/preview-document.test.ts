@@ -35,6 +35,13 @@ describe('the preview document', () => {
     expect(previewKindFor('.txt')).toBeNull()
   })
 
+  // Rendering LaTeX means running it, and galley does not execute a Draft.
+  // See `docs/adr/0006`.
+  it('is not offered for LaTeX Drafts', () => {
+    expect(previewKindFor('.tex')).toBeNull()
+    expect(previewKindFor('.bib')).toBeNull()
+  })
+
   it('carries the rendered Draft in its body', () => {
     const document = buildPreviewDocument('<h1>A Draft</h1>', 'markdown')
     expect(document.startsWith('<!doctype html>')).toBe(true)

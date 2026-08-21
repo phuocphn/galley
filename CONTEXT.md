@@ -5,7 +5,7 @@ A local editor for reviewing AI-generated prose and markup. You open a folder of
 ## Language
 
 **Draft**:
-A single AI-generated file under review (`.md`, `.html`, `.txt`). Editable in place.
+A single AI-generated file under review — prose or markup, in one of the formats galley reads. Editable in place.
 _Avoid_: Content, document, artifact, output.
 
 **Source**:

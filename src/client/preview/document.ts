@@ -5,8 +5,12 @@ import { PREVIEW_FRAME_SCRIPT } from './frame.js'
 export type PreviewKind = 'markdown' | 'html'
 
 /**
- * Which rendered preview a Draft gets, or null when it has none. A `.txt` Draft
- * reads the same rendered as it does in source, so it is offered no toggle.
+ * Which rendered preview a Draft gets, or null when it has none.
+ *
+ * A `.txt` Draft reads the same rendered as it does in source, so it is offered
+ * no toggle. A `.tex` or `.bib` Draft has none for a different reason: rendering
+ * LaTeX means *running* it, and galley does not execute a Draft — see
+ * `docs/adr/0006`.
  */
 export function previewKindFor(extension: DraftExtension): PreviewKind | null {
   switch (extension) {
@@ -15,6 +19,8 @@ export function previewKindFor(extension: DraftExtension): PreviewKind | null {
     case '.html':
       return 'html'
     case '.txt':
+    case '.tex':
+    case '.bib':
       return null
   }
 }
