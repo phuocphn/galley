@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { Hono } from 'hono'
+import { captureAnchor, locateAnchor } from '../shared/anchor.js'
 import { scopeOf } from '../shared/scope.js'
 import type {
   Anchor,
@@ -14,7 +15,6 @@ import type {
   ResolvedNote,
   ReviewListing,
 } from '../shared/types.js'
-import { captureAnchor, locateAnchor } from './anchor.js'
 import { handoffInstruction } from './handoff.js'
 import { asNoteKind, DEFAULT_NOTE_KIND } from './kind.js'
 import { listDrafts, readDraft, writeDraft } from './review.js'

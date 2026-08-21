@@ -1,4 +1,13 @@
-import type { Anchor } from '../shared/types.js'
+/**
+ * The Anchor matcher: cutting an Anchor from a Draft, and finding it again.
+ *
+ * Shared rather than the server's own, because the Preview maps a rendered
+ * passage back to the Source with the same matcher the server re-anchors with —
+ * see `docs/adr/0005`. Pure, and dependent only on shared types, so both sides
+ * run the identical rules and a Note cannot mean one thing on the way in and
+ * another on the way back.
+ */
+import type { Anchor } from './types.js'
 
 /** How much text either side of the anchor is kept to tell repeats apart. */
 const CONTEXT_LENGTH = 160
