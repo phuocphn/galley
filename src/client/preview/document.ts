@@ -66,8 +66,20 @@ function mintNonce(): string {
   return crypto.randomUUID().replaceAll('-', '')
 }
 
-/** Typography for the preview. A Draft's own `<style>` comes later, and wins. */
-const PREVIEW_STYLESHEET = `
+/**
+ * Typography for a Markdown Preview.
+ *
+ * Markdown renders to bare tags with no styling of its own, so the shell has to
+ * supply the whole of how it reads — including the measure, which is why the
+ * body is held to a column rather than run to the width of the pane.
+ *
+ * A Draft's own `<style>` comes later and wins, which is enough for the rules
+ * it overrides and no help at all for the ones it never mentions. That is why
+ * an HTML Draft gets a different shell rather than this one plus its own: a
+ * generated page brings its own layout, and a `max-width` it never asked for is
+ * not a rule it knows to override.
+ */
+const MARKDOWN_STYLESHEET = `
   html {
     background: #eceef1;
   }
@@ -121,6 +133,21 @@ const PREVIEW_STYLESHEET = `
 `
 
 /**
+ * The shell an HTML Draft is rendered in: almost nothing.
+ *
+ * A generated page is a whole document. It carries its own measure, its own
+ * grid, its own background — much of what the reviewer switched to the Preview
+ * to look at — and the shell's job is to stay out of the way of all of it. The
+ * one rule left is a background, so that a Draft which sets none reads as a
+ * page rather than showing the pane's grey through it.
+ */
+const HTML_STYLESHEET = `
+  html {
+    background: #ffffff;
+  }
+`
+
+/**
  * The whole document handed to the Preview frame, as a string.
  *
  * Kept free of the DOM and of the sanitiser so the shell itself — the policy,
@@ -135,8 +162,9 @@ const PREVIEW_STYLESHEET = `
  * The script goes last, after the markup it listens to, and carries the nonce
  * the policy names. It is the only element in the document that does.
  */
-export function buildPreviewDocument(bodyHtml: string): string {
+export function buildPreviewDocument(bodyHtml: string, kind: PreviewKind): string {
   const nonce = mintNonce()
+  const stylesheet = kind === 'markdown' ? MARKDOWN_STYLESHEET : HTML_STYLESHEET
 
   return [
     '<!doctype html>',
@@ -145,7 +173,7 @@ export function buildPreviewDocument(bodyHtml: string): string {
     '<meta charset="utf-8">',
     `<meta http-equiv="Content-Security-Policy" content="${previewContentSecurityPolicy(nonce)}">`,
     '<base target="_blank">',
-    `<style>${PREVIEW_STYLESHEET}</style>`,
+    `<style>${stylesheet}</style>`,
     '</head>',
     '<body>',
     bodyHtml,

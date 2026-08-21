@@ -54,7 +54,7 @@ export function renderPreviewDocument(source: string, kind: PreviewKind): string
     const blocks = markdownBlocks(source).map((block, index) =>
       stamped(DOMPurify.sanitize(marked.parser([block.token], { gfm: true })), index),
     )
-    return buildPreviewDocument(blocks.join('\n'))
+    return buildPreviewDocument(blocks.join('\n'), kind)
   }
 
   // An HTML Draft is a whole document, and a generated page keeps most of its
@@ -81,5 +81,5 @@ export function renderPreviewDocument(source: string, kind: PreviewKind): string
   }
 
   const headStyles = Array.from(parsed.head.querySelectorAll('style'), (style) => style.outerHTML)
-  return buildPreviewDocument([...headStyles, parsed.body.innerHTML].join('\n'))
+  return buildPreviewDocument([...headStyles, parsed.body.innerHTML].join('\n'), kind)
 }
