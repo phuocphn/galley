@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { DraftContents, Note, Sidecar } from '../src/shared/types.js'
+import type { DraftContents, DraftWritten, Note, Sidecar } from '../src/shared/types.js'
 import { createReviewFixture, type ReviewFixture } from './helpers/review-fixture.js'
 import { startLiveReview, type LiveReview } from './helpers/live-review.js'
 
@@ -38,6 +38,15 @@ function saving(content: string): RequestInit {
   }
 }
 
+/**
+ * The Draft as the server reads it after a write. Writing does not locate
+ * Anchors — see `docs/adr/0007` — so where a Note ended up is asked for
+ * separately, which is also exactly what the pane does.
+ */
+function afterWriting(review: ReviewFixture, draftPath: string): Promise<DraftContents> {
+  return review.getJson<DraftContents>(draftUrl(draftPath))
+}
+
 async function noteOnPhrase(
   review: ReviewFixture,
   phrase: string,
@@ -69,19 +78,23 @@ describe('writing a Draft back', () => {
     expect(await fixture.read('findings.md')).toBe(edited)
   })
 
-  it('hands back the Draft as the server now reads it', async () => {
+  // No Notes come back from a write — see `docs/adr/0007`. Where a Note points
+  // is a question a read answers, and this is the reviewer's autosave.
+  it('hands back what it wrote, and nothing about the Notes', async () => {
     fixture = await createReviewFixture({ 'findings.md': DRAFT })
 
     const edited = `${DRAFT}\nOne more paragraph, typed by the reviewer.\n`
-    const saved = await fixture.getJson<DraftContents>(draftUrl('findings.md'), saving(edited))
+    const saved = await fixture.getJson<DraftWritten>(draftUrl('findings.md'), saving(edited))
 
     expect(saved).toEqual({
       path: 'findings.md',
       extension: '.md',
       content: edited,
-      notes: [],
     })
-    expect(await fixture.getJson<DraftContents>(draftUrl('findings.md'))).toEqual(saved)
+
+    // The read is what carries the Notes, and it agrees about the text.
+    const read = await fixture.getJson<DraftContents>(draftUrl('findings.md'))
+    expect(read).toEqual({ ...saved, notes: [] })
   })
 
   it('writes a Draft in a nested folder, and one whose name needs escaping', async () => {
@@ -239,16 +252,11 @@ describe('a Note’s Anchor after the reviewer edits the Draft', () => {
     await noteOnPhrase(fixture, PHRASE)
 
     const edited = `# Summary\n\nWritten by the reviewer.\n\n${DRAFT}`
-    const saved = await fixture.getJson<DraftContents>(draftUrl('findings.md'), saving(edited))
+    await fixture.request(draftUrl('findings.md'), saving(edited))
 
+    const saved = await afterWriting(fixture, 'findings.md')
     expect(saved.notes[0]!.match).toBe('exact')
     expect(saved.content.slice(saved.notes[0]!.range!.from, saved.notes[0]!.range!.to)).toBe(PHRASE)
-
-    // And on the next read, which is how the Anchor is found after a reload.
-    const reread = await fixture.getJson<DraftContents>(draftUrl('findings.md'))
-    expect(reread.content.slice(reread.notes[0]!.range!.from, reread.notes[0]!.range!.to)).toBe(
-      PHRASE,
-    )
   })
 
   // Anchors are text, not line numbers (`docs/adr/0002`), so a format galley
@@ -271,7 +279,8 @@ describe('a Note’s Anchor after the reviewer edits the Draft', () => {
     })
 
     const edited = paper.replace('\\section{Evaluation}', '\\section{Evaluation}\\label{sec:eval}')
-    const saved = await fixture.getJson<DraftContents>(draftUrl('paper.tex'), saving(edited))
+    await fixture.request(draftUrl('paper.tex'), saving(edited))
+    const saved = await afterWriting(fixture, 'paper.tex')
 
     expect(saved.notes[0]!.match).toBe('exact')
     expect(saved.content.slice(saved.notes[0]!.range!.from, saved.notes[0]!.range!.to)).toBe(claim)
@@ -282,7 +291,8 @@ describe('a Note’s Anchor after the reviewer edits the Draft', () => {
     await noteOnPhrase(fixture, PHRASE)
 
     const edited = DRAFT.replace(PHRASE, 'outperforms most published baselines')
-    const saved = await fixture.getJson<DraftContents>(draftUrl('findings.md'), saving(edited))
+    await fixture.request(draftUrl('findings.md'), saving(edited))
+    const saved = await afterWriting(fixture, 'findings.md')
 
     expect(saved.notes[0]!.match).toBe('reworded')
     expect(saved.content.slice(saved.notes[0]!.range!.from, saved.notes[0]!.range!.to)).toBe(
@@ -294,10 +304,11 @@ describe('a Note’s Anchor after the reviewer edits the Draft', () => {
     fixture = await createReviewFixture({ 'findings.md': DRAFT })
     await noteOnPhrase(fixture, PHRASE)
 
-    const saved = await fixture.getJson<DraftContents>(
+    await fixture.request(
       draftUrl('findings.md'),
       saving('# Findings\n\nResults were mixed and we make no claims.\n'),
     )
+    const saved = await afterWriting(fixture, 'findings.md')
 
     expect(saved.notes[0]!.match).toBe('orphaned')
     expect(saved.notes[0]!.range).toBeNull()
@@ -313,10 +324,52 @@ describe('a Note’s Anchor after the reviewer edits the Draft', () => {
     await noteOnPhrase(fixture, PHRASE)
 
     const edited = DRAFT.replace('40,000 documents', '38,412 documents')
-    const saved = await fixture.getJson<DraftContents>(draftUrl('findings.md'), saving(edited))
+    await fixture.request(draftUrl('findings.md'), saving(edited))
+    const saved = await afterWriting(fixture, 'findings.md')
 
     expect(saved.notes[0]!.match).toBe('exact')
     expect(saved.content.slice(saved.notes[0]!.range!.from, saved.notes[0]!.range!.to)).toBe(PHRASE)
+  })
+})
+
+/**
+ * Locating an Anchor is memoised, because an Anchor can only move when the
+ * Source moves — `docs/adr/0007`. These are the two ways that memo could lie.
+ */
+describe('re-reading a Draft whose Anchors have already been located', () => {
+  it('finds the Anchor where it now is, not where it was first looked for', async () => {
+    fixture = await createReviewFixture({ 'findings.md': DRAFT })
+    await noteOnPhrase(fixture, PHRASE)
+
+    // Read once, so the Anchor's position is known.
+    const first = await fixture.getJson<DraftContents>(draftUrl('findings.md'))
+    expect(first.content.slice(first.notes[0]!.range!.from, first.notes[0]!.range!.to)).toBe(PHRASE)
+
+    // Push the passage down the file, then read again.
+    const edited = `# Summary\n\nWritten by the reviewer.\n\n${DRAFT}`
+    await fixture.request(draftUrl('findings.md'), saving(edited))
+
+    const second = await fixture.getJson<DraftContents>(draftUrl('findings.md'))
+    expect(second.notes[0]!.range!.from).toBeGreaterThan(first.notes[0]!.range!.from)
+    expect(second.content.slice(second.notes[0]!.range!.from, second.notes[0]!.range!.to)).toBe(
+      PHRASE,
+    )
+  })
+
+  it('still reports a Note’s Status, which the memo has no business holding', async () => {
+    fixture = await createReviewFixture({ 'findings.md': DRAFT })
+    const note = await noteOnPhrase(fixture, PHRASE)
+
+    const before = await fixture.getJson<DraftContents>(draftUrl('findings.md'))
+    expect(before.notes[0]!.status).toBe('open')
+
+    await fixture.request(`/api/notes/${note.id}/resolve`, { method: 'POST' })
+
+    // The Draft has not changed, so the Anchor is served from the memo. The
+    // Status is not the memo's to remember, and has to have moved on.
+    const after = await fixture.getJson<DraftContents>(draftUrl('findings.md'))
+    expect(after.notes[0]!.status).toBe('resolved')
+    expect(after.notes[0]!.range).toEqual(before.notes[0]!.range)
   })
 })
 

@@ -39,6 +39,18 @@ export interface DraftContents {
 }
 
 /**
+ * A Draft as it was just written back to disk.
+ *
+ * It carries no Notes, because writing does not locate Anchors — see
+ * `docs/adr/0007`. Ask for the Draft to find out where its Notes point now.
+ */
+export interface DraftWritten {
+  path: string
+  extension: DraftExtension
+  content: string
+}
+
+/**
  * Where a Note is attached. The text is authoritative; the line numbers are a
  * hint for humans reading the sidecar, and are never used to locate the Note.
  */
