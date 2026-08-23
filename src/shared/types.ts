@@ -35,7 +35,19 @@ export interface DraftContents {
   path: string
   extension: DraftExtension
   content: string
-  notes: ResolvedNote[]
+  notes: LocatedNote[]
+}
+
+/**
+ * A Draft as it was just written back to disk.
+ *
+ * It carries no Notes, because writing does not locate Anchors — see
+ * `docs/adr/0007`. Ask for the Draft to find out where its Notes point now.
+ */
+export interface DraftWritten {
+  path: string
+  extension: DraftExtension
+  content: string
 }
 
 /**
@@ -113,7 +125,7 @@ export interface Note {
 }
 
 /** A Note with its Anchor located in the Draft as it stands right now. */
-export interface ResolvedNote extends Note {
+export interface LocatedNote extends Note {
   /** Character offsets into the current Draft, or null if it wasn't found. */
   range: { from: number; to: number } | null
   /**

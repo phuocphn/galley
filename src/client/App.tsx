@@ -56,22 +56,53 @@ export function App() {
     }
   }, [selectedPath])
 
+  // A refresh already in flight, and whether another was asked for while it ran.
+  const refreshing = useRef<Promise<void>>(undefined)
+  const refreshAgain = useRef(false)
+
   /**
    * Reload the Draft and the Review after something changes.
    *
    * The Draft is replaced rather than cleared, so the pane keeps its scroll
    * position and any open thread instead of flickering back to a loading state.
+   *
+   * Refreshes coalesce. One change routinely asks for several: the reviewer
+   * resolves a Note, the caller refreshes, and the watcher sees the server's own
+   * write to the sidecar and announces it, which asks again — and an agent
+   * replying to a dozen Notes writes the sidecar a dozen times. Both triggers are
+   * worth keeping, because the direct one is what makes a click feel answered and
+   * the announced one is what carries the agent's work, so it is the duplication
+   * that is dropped rather than either path. A request arriving mid-flight is not
+   * discarded: it is remembered and re-run once, because it may have been about a
+   * change the in-flight read had already passed by.
    */
-  const refresh = useCallback(async () => {
-    const path = selected.current
-    // The listing is always reloaded: a Review Note changes nothing in the pane
-    // but everything in the sidebar, and can be left when no Draft is open.
-    const [contents, listing] = await Promise.all([
-      path ? fetchDraft(path) : undefined,
-      fetchReview(),
-    ])
-    setReview(listing)
-    if (contents && selected.current === path) setDraft(contents)
+  const refresh = useCallback(async (): Promise<void> => {
+    if (refreshing.current) {
+      refreshAgain.current = true
+      return refreshing.current
+    }
+
+    const run = async (): Promise<void> => {
+      do {
+        refreshAgain.current = false
+        const path = selected.current
+        // The listing is always reloaded: a Review Note changes nothing in the
+        // pane but everything in the sidebar, and can be left when no Draft is
+        // open.
+        const [contents, listing] = await Promise.all([
+          path ? fetchDraft(path) : undefined,
+          fetchReview(),
+        ])
+        setReview(listing)
+        if (contents && selected.current === path) setDraft(contents)
+      } while (refreshAgain.current)
+    }
+
+    const started = run().finally(() => {
+      refreshing.current = undefined
+    })
+    refreshing.current = started
+    return started
   }, [])
 
   // The agent works on the same folder while this window is open, so its edits

@@ -27,6 +27,25 @@ const DECISIVE_MARGIN = 0.06
 /** Fuzzy matching is quadratic; past this the Anchor has to match exactly. */
 const FUZZY_LENGTH_LIMIT = 2000
 
+/**
+ * How much comparison one Anchor may cost before we stop looking, counted in
+ * cells of the distance matrix.
+ *
+ * A long Anchor whose passage is genuinely gone is the worst case there is: no
+ * window is a good match, so no window ever tightens the search, and the seed
+ * still has to be tried everywhere it appears. Past this much work we decline to
+ * keep guessing and the Note comes back Orphaned — which is the same answer the
+ * search was overwhelmingly likely to reach anyway, and the same bargain
+ * `FUZZY_LENGTH_LIMIT` already strikes on length. The Note is not lost: it is
+ * pinned for re-attachment, and a reviewer pointing at the new passage is both
+ * quicker and more certain than any amount of further searching.
+ *
+ * Set well clear of what a real Review costs — the heaviest Anchor in the paper
+ * this was measured on came to 39M — so that it bounds the pathological case
+ * without touching the ordinary one.
+ */
+const FUZZY_WORK_LIMIT = 50_000_000
+
 /** Seed positions to explore before giving up. */
 const MAX_CANDIDATES = 64
 
@@ -94,46 +113,147 @@ function contextAgreement(content: string, anchor: Anchor, start: number, length
   return score
 }
 
-/** Levenshtein distance, bounded by the shorter of the two rows. */
-function editDistance(a: string, b: string): number {
+/** Stands in for "further than we are willing to look" inside the DP rows. */
+const UNREACHABLE = 0x3fffffff
+
+/**
+ * Levenshtein distance, given up on as soon as it exceeds `ceiling`.
+ *
+ * Every caller here is asking a yes/no question — is this window close enough to
+ * be the same passage? — so the exact distance of a window that is plainly too
+ * far is of no interest. Only the diagonal band within `ceiling` of the leading
+ * edge can hold a result that small, so the rest of each row is never computed,
+ * and a row whose best cell is already past the ceiling ends the search.
+ *
+ * Returns `Infinity` for "further than `ceiling`", which is a real answer and
+ * not a failure: it is what lets the caller skip the window.
+ */
+function editDistanceWithin(a: string, b: string, ceiling: number): number {
   if (a === b) return 0
+  // A length difference is a lower bound on the distance all by itself.
+  if (Math.abs(a.length - b.length) > ceiling) return Infinity
   if (a.length === 0) return b.length
   if (b.length === 0) return a.length
 
-  let previous = Array.from({ length: b.length + 1 }, (_, i) => i)
-  let current = new Array<number>(b.length + 1)
+  const width = b.length
+  let previous = new Int32Array(width + 1)
+  let current = new Int32Array(width + 1)
+  for (let j = 0; j <= width; j++) previous[j] = j > ceiling ? UNREACHABLE : j
 
   for (let i = 1; i <= a.length; i++) {
-    current[0] = i
-    for (let j = 1; j <= b.length; j++) {
-      const substitution = previous[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1)
-      current[j] = Math.min(current[j - 1]! + 1, previous[j]! + 1, substitution)
+    const from = Math.max(1, i - ceiling)
+    const to = Math.min(width, i + ceiling)
+
+    current[0] = i <= ceiling ? i : UNREACHABLE
+    if (from - 1 >= 1) current[from - 1] = UNREACHABLE
+
+    let best = UNREACHABLE
+    const left = a.charCodeAt(i - 1)
+    for (let j = from; j <= to; j++) {
+      const substitution = previous[j - 1]! + (left === b.charCodeAt(j - 1) ? 0 : 1)
+      const deletion = previous[j]! + 1
+      const insertion = current[j - 1]! + 1
+      const cell = Math.min(substitution, deletion, insertion)
+      current[j] = cell
+      if (cell < best) best = cell
     }
+    if (to + 1 <= width) current[to + 1] = UNREACHABLE
+
+    // Distances never shrink as rows are added, so once the whole row is past
+    // the ceiling nothing below it can come back under.
+    if (best > ceiling) return Infinity
     ;[previous, current] = [current, previous]
   }
 
-  return previous[b.length]!
-}
-
-/** 0 to 1, where 1 is identical. */
-function similarity(a: string, b: string): number {
-  const longest = Math.max(a.length, b.length)
-  return longest === 0 ? 1 : 1 - editDistance(a, b) / longest
+  const distance = previous[width]!
+  return distance > ceiling ? Infinity : distance
 }
 
 /**
- * A distinctive word from the Anchor, used to find candidate windows without
- * scanning every offset in the Draft. The longest word is the least likely to
- * be a preposition that appears in every sentence.
+ * A lower bound on the edit distance, from the characters alone.
+ *
+ * Two strings cannot be closer than the characters they fail to share, and
+ * counting those is linear where the real distance is quadratic. Almost every
+ * candidate window in a Draft is obviously wrong, and this is what makes
+ * discarding one cost nothing.
  */
-function seedOf(text: string): { seed: string; offset: number } | undefined {
-  let best: { seed: string; offset: number } | undefined
+function unsharedCharacters(a: string, b: string): number {
+  const counts = new Map<number, number>()
+  for (let i = 0; i < a.length; i++) {
+    const code = a.charCodeAt(i)
+    counts.set(code, (counts.get(code) ?? 0) + 1)
+  }
 
-  for (const match of text.matchAll(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)) {
-    const word = match[0]
-    if (word.length < 4) continue
-    if (!best || word.length > best.seed.length) {
-      best = { seed: word, offset: match.index }
+  let shared = 0
+  for (let i = 0; i < b.length; i++) {
+    const remaining = counts.get(b.charCodeAt(i))
+    if (remaining === undefined || remaining === 0) continue
+    counts.set(b.charCodeAt(i), remaining - 1)
+    shared++
+  }
+
+  return Math.max(a.length, b.length) - shared
+}
+
+/**
+ * 0 to 1, where 1 is identical — or `undefined` for "below `floor`", which is
+ * how a window we were never going to accept is dismissed without measuring it.
+ */
+function similarity(a: string, b: string, floor: number): number | undefined {
+  const longest = Math.max(a.length, b.length)
+  if (longest === 0) return 1
+
+  const ceiling = Math.floor(longest * (1 - floor))
+  if (ceiling < 0) return undefined
+  if (unsharedCharacters(a, b) > ceiling) return undefined
+
+  const distance = editDistanceWithin(a, b, ceiling)
+  return distance === Infinity ? undefined : 1 - distance / longest
+}
+
+/**
+ * How many words to weigh up as a seed. Not a tuning knob — a bound on the
+ * worst case, for a very long Anchor in a very long Draft, where counting every
+ * word's occurrences would cost more than the search it is meant to shorten.
+ */
+const SEED_CANDIDATES = 48
+
+/**
+ * A distinctive word from the Anchor, used to find candidate windows without
+ * scanning every offset in the Draft.
+ *
+ * Distinctive means rare *in this Draft*, which is the thing that actually
+ * matters and is cheap to measure. Picking the longest word instead — the old
+ * rule — reads as a proxy for the same idea and behaves as the opposite of it:
+ * the longest word in a paper is routinely the paper's own subject, which is in
+ * every other paragraph. On a real Review the seed came out as the project's
+ * name, 22 occurrences, and every one of them was a window to score.
+ *
+ * The longest few words are what get counted, because a word has to be long
+ * enough to be worth searching for before it is worth asking how rare it is.
+ */
+function seedOf(text: string, content: string): { seed: string; offset: number } | undefined {
+  const words: { seed: string; offset: number }[] = []
+  for (const match of text.matchAll(/[\p{L}\p{N}][\p{L}\p{N}'\u2019-]*/gu)) {
+    if (match[0].length < 4) continue
+    words.push({ seed: match[0], offset: match.index })
+  }
+  if (words.length === 0) return undefined
+
+  const longest = [...words].sort((a, b) => b.seed.length - a.seed.length).slice(0, SEED_CANDIDATES)
+
+  let best: { seed: string; offset: number } | undefined
+  let fewest = Infinity
+  for (const word of longest) {
+    const occurrences = occurrencesOf(content, word.seed, MAX_CANDIDATES + 1).length
+    // A word that isn't in the Draft at all seeds nothing, so it is no help.
+    if (occurrences === 0) continue
+    if (occurrences < fewest) {
+      best = word
+      fewest = occurrences
+      // One occurrence is one window to score. Nothing beats that, and the
+      // longest such word is reached first, so there is no reason to look on.
+      if (fewest === 1) break
     }
   }
 
@@ -167,22 +287,50 @@ function wordBoundariesBetween(content: string, from: number, to: number): numbe
 function rewordCandidates(content: string, anchor: Anchor): { start: number; end: number; score: number }[] {
   if (anchor.text.length > FUZZY_LENGTH_LIMIT) return []
 
-  const seed = seedOf(anchor.text)
+  const seed = seedOf(anchor.text, content)
   if (!seed) return []
 
   const length = anchor.text.length
-  const shortest = Math.max(1, Math.floor(length * (1 - LENGTH_SLACK)))
-  const longest = Math.ceil(length * (1 + LENGTH_SLACK))
+
+  // Two windows cannot be more similar than their lengths allow: an edit
+  // distance is at least the difference in length, so a window outside
+  // [T·L, L/T] can never reach REWORD_THRESHOLD however well its text reads.
+  // LENGTH_SLACK is the looser rule of the two, so it is where scoring stops
+  // and this is where scoring never began.
+  const shortest = Math.max(
+    Math.max(1, Math.floor(length * (1 - LENGTH_SLACK))),
+    Math.ceil(length * REWORD_THRESHOLD),
+  )
+  const longest = Math.min(
+    Math.ceil(length * (1 + LENGTH_SLACK)),
+    Math.floor(length / REWORD_THRESHOLD),
+  )
+
+  // A candidate below this is neither an answer nor close enough to a better
+  // one to make it a coin toss, so it can be dropped without being measured.
+  const worthScoring = REWORD_THRESHOLD - DECISIVE_MARGIN
 
   const best: { start: number; end: number; score: number }[] = []
+  let spent = 0
 
   for (const seedAt of occurrencesOf(content, seed.seed)) {
+    if (spent > FUZZY_WORK_LIMIT) break
     const start = Math.max(0, Math.min(content.length, seedAt - seed.offset))
 
     let bestHere: { start: number; end: number; score: number } | undefined
     for (const end of wordBoundariesBetween(content, start + shortest, start + longest)) {
-      const score = similarity(anchor.text, content.slice(start, end))
-      if (!bestHere || score > bestHere.score) bestHere = { start, end, score }
+      if (spent > FUZZY_WORK_LIMIT) break
+
+      const floor = bestHere ? Math.max(bestHere.score, worthScoring) : worthScoring
+      // What this window is about to cost, charged before it is spent: the
+      // matrix is as wide as the window and as tall as the band we search.
+      const span = Math.max(length, end - start)
+      spent += length * Math.min(span, 2 * Math.floor(span * (1 - floor)) + 1)
+
+      const score = similarity(anchor.text, content.slice(start, end), floor)
+      if (score !== undefined && (!bestHere || score > bestHere.score)) {
+        bestHere = { start, end, score }
+      }
     }
 
     if (bestHere) best.push(bestHere)

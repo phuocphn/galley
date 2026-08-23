@@ -1,35 +1,42 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { Hono } from 'hono'
-import { captureAnchor, locateAnchor } from '../shared/anchor.js'
+import { captureAnchor } from '../shared/anchor.js'
 import { scopeOf } from '../shared/scope.js'
 import type {
   Anchor,
   DraftContents,
+  DraftWritten,
   Handoff,
+  LocatedNote,
   NewNote,
   Note,
   Reanchor,
   Reply,
   ReplyAuthor,
-  ResolvedNote,
   ReviewListing,
 } from '../shared/types.js'
 import { handoffInstruction } from './handoff.js'
 import { asNoteKind, DEFAULT_NOTE_KIND } from './kind.js'
+import { LocatedAnchors } from './located.js'
 import { listDrafts, readDraft, writeDraft } from './review.js'
 import { mutateNotes, readNotes } from './sidecar.js'
 import { normalised, statusOf } from './status.js'
 
 /** Attach each Note to the Draft as it stands right now. */
-function resolveNotes(notes: Note[], content: string): ResolvedNote[] {
+function locateNotes(
+  notes: Note[],
+  draftPath: string,
+  content: string,
+  anchors: LocatedAnchors,
+): LocatedNote[] {
   return notes.map((note) => {
     // A Draft-Scope Note has no Anchor to look for. It reports `unanchored`
     // rather than `orphaned`: nothing has been lost, it was never about a
     // particular passage.
     if (!note.anchor) return { ...normalised(note), range: null, match: 'unanchored' }
 
-    const located = locateAnchor(content, note.anchor)
+    const located = anchors.locate(draftPath, content, note.anchor)
     return {
       ...normalised(note),
       anchor: { ...note.anchor, orphaned: located === undefined },
@@ -50,12 +57,12 @@ function resolveNotes(notes: Note[], content: string): ResolvedNote[] {
 async function recordOrphans(
   reviewRoot: string,
   stored: Note[],
-  resolved: ResolvedNote[],
+  located: LocatedNote[],
 ): Promise<void> {
   // Only Notes with an Anchor can lose one. A Draft-Scope Note is left out of
   // the map entirely, so neither the check nor the rewrite below touches it.
   const nowOrphaned = new Map(
-    resolved.filter((note) => note.anchor).map((note) => [note.id, note.range === null]),
+    located.filter((note) => note.anchor).map((note) => [note.id, note.range === null]),
   )
 
   const changed = stored.some((note) => {
@@ -104,6 +111,7 @@ async function changeNote(
 export function createReviewApp(reviewRoot: string): Hono {
   const root = path.resolve(reviewRoot)
   const app = new Hono()
+  const anchors = new LocatedAnchors()
 
   app.get('/api/review', async (c) => {
     const [drafts, notes] = await Promise.all([listDrafts(root), readNotes(root)])
@@ -137,10 +145,10 @@ export function createReviewApp(reviewRoot: string): Hono {
     if (!draft) return c.json({ error: `No such Draft in this Review: ${draftPath}` }, 404)
 
     const notes = (await readNotes(root)).filter((note) => note.draftPath === draftPath)
-    const resolved = resolveNotes(notes, draft.content)
-    await recordOrphans(root, notes, resolved)
+    const located = locateNotes(notes, draftPath, draft.content, anchors)
+    await recordOrphans(root, notes, located)
 
-    const contents: DraftContents = { path: draftPath, ...draft, notes: resolved }
+    const contents: DraftContents = { path: draftPath, ...draft, notes: located }
     return c.json(contents)
   })
 
@@ -162,19 +170,17 @@ export function createReviewApp(reviewRoot: string): Hono {
     const written = await writeDraft(root, draftPath, submitted.content)
     if (!written) return c.json({ error: `No such Draft in this Review: ${draftPath}` }, 404)
 
-    // Same bookkeeping a read does: the reviewer can edit an anchored passage
-    // away just as the agent can, and the sidecar should say so.
-    const notes = (await readNotes(root)).filter((note) => note.draftPath === draftPath)
-    const resolved = resolveNotes(notes, submitted.content)
-    await recordOrphans(root, notes, resolved)
-
-    const contents: DraftContents = {
+    // Writing does not locate Anchors — see `docs/adr/0007`. A write is not
+    // asking where the Notes are now, and this is the reviewer's autosave, so
+    // asking anyway put a full re-anchoring pass between every pause in their
+    // typing and the next keystroke. The next read is where the question gets
+    // asked, and it is the only place anyone is waiting for the answer.
+    const saved: DraftWritten = {
       path: draftPath,
       extension: written.extension,
       content: submitted.content,
-      notes: resolved,
     }
-    return c.json(contents)
+    return c.json(saved)
   })
 
   app.post('/api/notes', async (c) => {

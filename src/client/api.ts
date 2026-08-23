@@ -1,5 +1,6 @@
 import type {
   DraftContents,
+  DraftWritten,
   Handoff,
   NewNote,
   Note,
@@ -32,11 +33,11 @@ export function fetchDraft(draftPath: string): Promise<DraftContents> {
 
 /**
  * Write a Draft back to disk. The whole buffer goes, because the buffer is what
- * the reviewer means the file to say — see `docs/adr/0003`. The response is the
- * Draft as the server now reads it, with its Notes re-located in the new text.
+ * the reviewer means the file to say — see `docs/adr/0003`. Nothing comes back
+ * about the Notes: a write does not locate Anchors — see `docs/adr/0007`.
  */
-export function saveDraft(draftPath: string, content: string): Promise<DraftContents> {
-  return send<DraftContents>(
+export function saveDraft(draftPath: string, content: string): Promise<DraftWritten> {
+  return send<DraftWritten>(
     `/api/draft?${new URLSearchParams({ path: draftPath })}`,
     asJson('PUT', { content }),
   )

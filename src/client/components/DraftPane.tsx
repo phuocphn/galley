@@ -6,7 +6,7 @@ import { stex } from '@codemirror/legacy-modes/mode/stex'
 import { EditorSelection, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { DraftContents, DraftExtension, ResolvedNote } from '../../shared/types.js'
+import type { DraftContents, DraftExtension, LocatedNote } from '../../shared/types.js'
 import {
   addReply,
   createNote,
@@ -107,7 +107,7 @@ function languageFor(extension: DraftExtension): Extension[] {
 /** The version on disk, held back while the reviewer decides what to do with it. */
 interface Conflict {
   content: string
-  notes: ResolvedNote[]
+  notes: LocatedNote[]
 }
 
 interface DraftPaneProps {
