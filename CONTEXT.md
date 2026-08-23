@@ -24,6 +24,10 @@ _Avoid_: Comment (means `<!-- -->` inside a Draft), feedback, annotation, remark
 The location a Note is attached to — a text range, recorded with enough surrounding text to be re-found after the Draft changes.
 _Avoid_: Selection, position, target, location.
 
+**Located**:
+The state of a Note whose Anchor has been found in the Draft as it stands now — either verbatim, or reworded closely enough to still be the same passage. The counterpart of Orphaned.
+_Avoid_: Resolved (that is a Status, and means the reviewer accepted the Note), matched, found, positioned.
+
 **Orphaned**:
 The state of a Note whose Anchor can no longer be found in the Draft, typically because the agent rewrote that passage away.
 _Avoid_: Stale, broken, lost, detached.

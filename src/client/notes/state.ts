@@ -1,5 +1,5 @@
 import { StateEffect, StateField, type ChangeDesc } from '@codemirror/state'
-import type { ResolvedNote } from '../../shared/types.js'
+import type { LocatedNote } from '../../shared/types.js'
 
 /**
  * Move a range through a document change.
@@ -26,7 +26,7 @@ function mapRange(
 }
 
 /** Replace the Notes the pane is showing. Dispatched whenever they're refetched. */
-export const setNotes = StateEffect.define<ResolvedNote[]>()
+export const setNotes = StateEffect.define<LocatedNote[]>()
 
 /** Open the composer over a range of the Draft. */
 export const openComposer = StateEffect.define<{ from: number; to: number }>()
@@ -52,7 +52,7 @@ export const setEditing = StateEffect.define<string | null>()
  */
 export const setReattaching = StateEffect.define<string | null>()
 
-export const notesField = StateField.define<ResolvedNote[]>({
+export const notesField = StateField.define<LocatedNote[]>({
   create: () => [],
   update(notes, transaction) {
     // A fresh set from the server is already located in the document that
@@ -137,9 +137,9 @@ export const reattachingField = StateField.define<string | null>({
  * Note itself — its body, Status and Replies — is still the server's to tell us.
  */
 export function keepingLocalAnchors(
-  incoming: ResolvedNote[],
-  showing: readonly ResolvedNote[],
-): ResolvedNote[] {
+  incoming: LocatedNote[],
+  showing: readonly LocatedNote[],
+): LocatedNote[] {
   const located = new Map(showing.filter((note) => note.range).map((note) => [note.id, note]))
 
   return incoming.map((note) => {
@@ -150,7 +150,7 @@ export function keepingLocalAnchors(
 
 /** The 1-based lines a Note covers in the Draft as it stands, if it was found. */
 export function noteLines(
-  note: ResolvedNote,
+  note: LocatedNote,
   lineAt: (offset: number) => number,
 ): { start: number; end: number } | undefined {
   if (!note.range) return undefined

@@ -35,7 +35,7 @@ export interface DraftContents {
   path: string
   extension: DraftExtension
   content: string
-  notes: ResolvedNote[]
+  notes: LocatedNote[]
 }
 
 /**
@@ -113,7 +113,7 @@ export interface Note {
 }
 
 /** A Note with its Anchor located in the Draft as it stands right now. */
-export interface ResolvedNote extends Note {
+export interface LocatedNote extends Note {
   /** Character offsets into the current Draft, or null if it wasn't found. */
   range: { from: number; to: number } | null
   /**

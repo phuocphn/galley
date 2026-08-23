@@ -12,7 +12,7 @@ import type {
   Reanchor,
   Reply,
   ReplyAuthor,
-  ResolvedNote,
+  LocatedNote,
   ReviewListing,
 } from '../shared/types.js'
 import { handoffInstruction } from './handoff.js'
@@ -22,7 +22,7 @@ import { mutateNotes, readNotes } from './sidecar.js'
 import { normalised, statusOf } from './status.js'
 
 /** Attach each Note to the Draft as it stands right now. */
-function resolveNotes(notes: Note[], content: string): ResolvedNote[] {
+function locateNotes(notes: Note[], content: string): LocatedNote[] {
   return notes.map((note) => {
     // A Draft-Scope Note has no Anchor to look for. It reports `unanchored`
     // rather than `orphaned`: nothing has been lost, it was never about a
@@ -50,12 +50,12 @@ function resolveNotes(notes: Note[], content: string): ResolvedNote[] {
 async function recordOrphans(
   reviewRoot: string,
   stored: Note[],
-  resolved: ResolvedNote[],
+  located: LocatedNote[],
 ): Promise<void> {
   // Only Notes with an Anchor can lose one. A Draft-Scope Note is left out of
   // the map entirely, so neither the check nor the rewrite below touches it.
   const nowOrphaned = new Map(
-    resolved.filter((note) => note.anchor).map((note) => [note.id, note.range === null]),
+    located.filter((note) => note.anchor).map((note) => [note.id, note.range === null]),
   )
 
   const changed = stored.some((note) => {
@@ -137,10 +137,10 @@ export function createReviewApp(reviewRoot: string): Hono {
     if (!draft) return c.json({ error: `No such Draft in this Review: ${draftPath}` }, 404)
 
     const notes = (await readNotes(root)).filter((note) => note.draftPath === draftPath)
-    const resolved = resolveNotes(notes, draft.content)
-    await recordOrphans(root, notes, resolved)
+    const located = locateNotes(notes, draft.content)
+    await recordOrphans(root, notes, located)
 
-    const contents: DraftContents = { path: draftPath, ...draft, notes: resolved }
+    const contents: DraftContents = { path: draftPath, ...draft, notes: located }
     return c.json(contents)
   })
 
@@ -165,14 +165,14 @@ export function createReviewApp(reviewRoot: string): Hono {
     // Same bookkeeping a read does: the reviewer can edit an anchored passage
     // away just as the agent can, and the sidecar should say so.
     const notes = (await readNotes(root)).filter((note) => note.draftPath === draftPath)
-    const resolved = resolveNotes(notes, submitted.content)
-    await recordOrphans(root, notes, resolved)
+    const located = locateNotes(notes, submitted.content)
+    await recordOrphans(root, notes, located)
 
     const contents: DraftContents = {
       path: draftPath,
       extension: written.extension,
       content: submitted.content,
-      notes: resolved,
+      notes: located,
     }
     return c.json(contents)
   })

@@ -1,7 +1,7 @@
 import { EditorState } from '@codemirror/state'
 import { describe, expect, it } from 'vitest'
 import { keepingLocalAnchors, notesField, setNotes } from '../src/client/notes/state.js'
-import type { ResolvedNote } from '../src/shared/types.js'
+import type { LocatedNote } from '../src/shared/types.js'
 
 /**
  * Anchors while the reviewer is typing.
@@ -21,7 +21,7 @@ import type { ResolvedNote } from '../src/shared/types.js'
 
 const WHEN = '2026-01-01T00:00:00.000Z'
 
-function noteOn(content: string, phrase: string, id = 'note-1'): ResolvedNote {
+function noteOn(content: string, phrase: string, id = 'note-1'): LocatedNote {
   const from = content.indexOf(phrase)
   expect(from, `"${phrase}" is not in the Draft`).toBeGreaterThanOrEqual(0)
 
@@ -41,7 +41,7 @@ function noteOn(content: string, phrase: string, id = 'note-1'): ResolvedNote {
 }
 
 /** A Draft pane showing one Note, ready to be typed in. */
-function paneShowing(content: string, ...showing: ResolvedNote[]): EditorState {
+function paneShowing(content: string, ...showing: LocatedNote[]): EditorState {
   const state = EditorState.create({ doc: content, extensions: [notesField] })
   return state.update({ effects: setNotes.of(showing) }).state
 }
@@ -180,7 +180,7 @@ describe('Notes arriving while the buffer has unsaved edits', () => {
 
     // The server located this against the file on disk, which is one paragraph
     // behind what the reviewer is looking at.
-    const fromServer: ResolvedNote = {
+    const fromServer: LocatedNote = {
       ...noteOn(DRAFT, PHRASE),
       status: 'answered',
       replies: [{ id: 'r1', author: 'agent', body: 'Cited it.', createdAt: WHEN }],

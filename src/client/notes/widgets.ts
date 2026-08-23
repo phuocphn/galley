@@ -5,7 +5,7 @@ import {
   type NoteKind,
   type NoteStatus,
   type Reply,
-  type ResolvedNote,
+  type LocatedNote,
 } from '../../shared/types.js'
 import { button, element } from './dom.js'
 import { renderMarkdown } from './markdown.js'
@@ -238,7 +238,7 @@ export class ComposerWidget extends WidgetType {
 /** One saved Note, rendered beneath the text it is about. */
 export class ThreadWidget extends WidgetType {
   constructor(
-    private readonly note: ResolvedNote,
+    private readonly note: LocatedNote,
     private readonly collapsed: boolean,
     private readonly editing: boolean,
     private readonly handlers: NoteHandlers,

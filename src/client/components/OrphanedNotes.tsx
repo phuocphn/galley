@@ -1,7 +1,7 @@
-import type { Anchor, ResolvedNote } from '../../shared/types.js'
+import type { Anchor, LocatedNote } from '../../shared/types.js'
 
 /** Losing an Anchor is what orphans a Note, so an Orphaned one always had one. */
-export type OrphanedNote = ResolvedNote & { anchor: Anchor }
+export type OrphanedNote = LocatedNote & { anchor: Anchor }
 
 interface OrphanedNotesProps {
   notes: OrphanedNote[]
