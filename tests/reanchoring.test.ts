@@ -217,6 +217,58 @@ describe('the orphaned flag in the sidecar', () => {
   })
 })
 
+/**
+ * What re-anchoring costs when it fails.
+ *
+ * An Orphaned Note is the expensive one: its text is not there to be found, so
+ * the exact match falls through and the fuzzy search runs in full. A Draft with
+ * many of them is the shape that made a real Review take nineteen seconds to
+ * open, and it is the shape this bounds — see `docs/adr/0007`.
+ */
+describe('a Draft where the agent rewrote every anchored passage away', () => {
+  // A paper that talks about itself constantly, so the words an Anchor shares
+  // with the Draft are the least distinctive ones in it.
+  const paragraph = (n: number): string =>
+    `Configuration ${n} of CircuitEvolve reduces the search budget substantially, ` +
+    `and CircuitEvolve preserves the corner coverage that the CircuitEvolve ` +
+    `baseline reported for specification ${n}, which the specification review of ` +
+    `stage ${n} had previously identified as the dominant bottleneck here. The ` +
+    `CircuitEvolve schedule for specification ${n} was therefore rebuilt around ` +
+    `the corner analysis, and the CircuitEvolve authors report that the stage ` +
+    `${n} specification now settles well inside the corner budget they had set.`
+
+  const revised = (n: number): string =>
+    `In revision ${n} the CircuitEvolve pipeline was restructured entirely, and ` +
+    `CircuitEvolve now defers the specification sweep until the CircuitEvolve ` +
+    `scheduler has settled, which the specification notes for stage ${n} argue ` +
+    `is the only ordering that keeps the corner analysis tractable at all. The ` +
+    `CircuitEvolve schedule for specification ${n} is rebuilt lazily instead, ` +
+    `and the CircuitEvolve maintainers note that the stage ${n} specification ` +
+    `settles inside the corner budget without any sweep being run up front.`
+
+  const NOTES = 20
+  const before = Array.from({ length: NOTES }, (_, n) => paragraph(n)).join('\n\n') + '\n'
+  const after = Array.from({ length: NOTES }, (_, n) => revised(n)).join('\n\n') + '\n'
+
+  it('Orphans them all, and gives up looking rather than grinding', async () => {
+    fixture = await createReviewFixture({ 'findings.md': before })
+
+    for (let n = 0; n < NOTES; n++) {
+      await noteOnPhrase(fixture, paragraph(n).slice(0, 420), before)
+    }
+    await fixture.write('findings.md', after)
+
+    const draft = await readDraft(fixture)
+
+    expect(draft.notes).toHaveLength(NOTES)
+    expect(draft.notes.every((note) => note.match === 'orphaned')).toBe(true)
+    // The clock is the other half of this test. Reading this Draft takes about
+    // two seconds with the work limit in place and comfortably over five without
+    // it, so vitest's own timeout is what catches the search running unbounded —
+    // there is no wall-clock assertion here to drift or to tune.
+  })
+})
+
 describe('re-attaching an Orphaned Note', () => {
   it('anchors it to newly selected text and clears the flag', async () => {
     fixture = await createReviewFixture({ 'findings.md': ORIGINAL })
