@@ -12,5 +12,5 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["src/cli.ts", "src/server/**/*.ts", "src/shared/**/*.ts"]
+  "include": ["src/cli.ts", "src/desk/**/*.ts", "src/server/**/*.ts", "src/shared/**/*.ts"]
 }
