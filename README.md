@@ -54,6 +54,18 @@ When the passage is genuinely gone, the Note becomes Orphaned and is pinned to t
 top of the Draft for re-attachment — never silently dropped, and never silently
 pointing at the wrong line.
 
+**Several Reviews at once.** Every folder you open goes on the same Desk — one
+background process — at its own URL, so a paper and its cover letter can be open
+side by side in two tabs. A Review's URL is worked out from its folder rather
+than handed out when it opens, so it is the same every time and can be
+bookmarked. `galley stop` puts the Desk away; it also stands down on its own once
+nothing is being reviewed.
+
+```bash
+galley ./launch-copy     # http://localhost:4317/r/launch-copy-a1b2
+galley ./whitepaper      # http://localhost:4317/r/whitepaper-9f3c
+```
+
 **Three Scopes.** A Note can reach a passage, a whole Draft, or the whole Review —
 the folder you opened. Feedback that applies to everything doesn't have to be pasted
 onto everything.
@@ -124,10 +136,14 @@ npm test          # Vitest against the Review API, over temp fixture folders
 npm run typecheck
 npm run build     # client (Vite) + server (tsc) into dist/
 node dist/cli.js ./some-folder
+node dist/cli.js stop
 ```
 
-`npm run dev` serves the client with hot reload and proxies `/api` to a server
-started separately with `npm run dev:server -- ./some-folder`.
+`npm run dev:server -- ./some-folder` runs the Desk in the foreground with a
+Review already on it, and `npm run dev` serves the client with hot reload,
+proxying each Review's API to it. Develop at the URL the Desk prints, with the
+Vite port — `http://localhost:5173/r/<review>` — so the client resolves its
+Review from the URL exactly as it does in a build.
 
 ## License
 

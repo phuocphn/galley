@@ -32,6 +32,10 @@ _Avoid_: Resolved (that is a Status, and means the reviewer accepted the Note), 
 The state of a Note whose Anchor can no longer be found in the Draft, typically because the agent rewrote that passage away.
 _Avoid_: Stale, broken, lost, detached.
 
+**Desk**:
+The one process serving every open Review, each at its own URL. Started by the first `galley` command that needs it and outliving the terminal that ran it, so several Reviews can be open at once.
+_Avoid_: Server, daemon, host, instance.
+
 **Review**:
 One folder of Drafts opened together for a single pass of feedback.
 _Avoid_: Workspace, project, batch, session.

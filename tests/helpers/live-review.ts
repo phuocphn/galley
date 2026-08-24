@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { ReviewEvent } from '../../src/shared/types.js'
-import { EVENTS_PATH, startServer } from '../../src/server/serve.js'
+import { startServer } from '../../src/server/serve.js'
 
 /**
  * A Review served by a real listening server, for the parts of the contract
@@ -41,7 +41,7 @@ export async function startLiveReview(
   const waiting: { predicate: (event: ReviewEvent) => boolean; settle: (e: ReviewEvent) => void }[] =
     []
 
-  const socket = new WebSocket(`ws://localhost:${server.port}${EVENTS_PATH}`)
+  const socket = new WebSocket(`ws://localhost:${server.port}${server.eventsPath}`)
   socket.addEventListener('message', (message) => {
     const event = JSON.parse(String(message.data)) as ReviewEvent
     const index = waiting.findIndex((waiter) => waiter.predicate(event))

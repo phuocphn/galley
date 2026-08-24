@@ -9,9 +9,15 @@ import type {
   ReplyAuthor,
   ReviewListing,
 } from '../shared/types.js'
+import { reviewBase } from './base.js'
 
-async function send<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init)
+/** Every request is about the Review this page was loaded from. */
+function url(pathname: string): string {
+  return `${reviewBase()}${pathname}`
+}
+
+async function send<T>(target: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(target, init)
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string }
     throw new Error(body.error ?? `Request failed: ${response.status}`)
@@ -24,11 +30,11 @@ function asJson(method: string, value: unknown): RequestInit {
 }
 
 export function fetchReview(): Promise<ReviewListing> {
-  return send<ReviewListing>('/api/review')
+  return send<ReviewListing>(url('/api/review'))
 }
 
 export function fetchDraft(draftPath: string): Promise<DraftContents> {
-  return send<DraftContents>(`/api/draft?${new URLSearchParams({ path: draftPath })}`)
+  return send<DraftContents>(url(`/api/draft?${new URLSearchParams({ path: draftPath })}`))
 }
 
 /**
@@ -38,35 +44,37 @@ export function fetchDraft(draftPath: string): Promise<DraftContents> {
  */
 export function saveDraft(draftPath: string, content: string): Promise<DraftWritten> {
   return send<DraftWritten>(
-    `/api/draft?${new URLSearchParams({ path: draftPath })}`,
+    url(`/api/draft?${new URLSearchParams({ path: draftPath })}`),
     asJson('PUT', { content }),
   )
 }
 
 export function createNote(note: NewNote): Promise<Note> {
-  return send<Note>('/api/notes', asJson('POST', note))
+  return send<Note>(url('/api/notes'), asJson('POST', note))
 }
 
 export function updateNote(id: string, change: NoteChange): Promise<Note> {
-  return send<Note>(`/api/notes/${id}`, asJson('PATCH', change))
+  return send<Note>(url(`/api/notes/${id}`), asJson('PATCH', change))
 }
 
 export function deleteNote(id: string): Promise<void> {
-  return send<void>(`/api/notes/${id}`, { method: 'DELETE' })
+  return send<void>(url(`/api/notes/${id}`), { method: 'DELETE' })
 }
 
 export function addReply(id: string, body: string, author: ReplyAuthor = 'reviewer'): Promise<Note> {
-  return send<Note>(`/api/notes/${id}/replies`, asJson('POST', { body, author }))
+  return send<Note>(url(`/api/notes/${id}/replies`), asJson('POST', { body, author }))
 }
 
 export function reanchorNote(id: string, range: Reanchor): Promise<Note> {
-  return send<Note>(`/api/notes/${id}/reanchor`, asJson('POST', range))
+  return send<Note>(url(`/api/notes/${id}/reanchor`), asJson('POST', range))
 }
 
 export function resolveNote(id: string): Promise<Note> {
-  return send<Note>(`/api/notes/${id}/resolve`, { method: 'POST' })
+  // Bodyless, but sent as JSON all the same: the Desk refuses a state-changing
+  // request that a form could have made (`docs/adr/0008`).
+  return send<Note>(url(`/api/notes/${id}/resolve`), asJson('POST', {}))
 }
 
 export function fetchHandoff(): Promise<Handoff> {
-  return send<Handoff>('/api/handoff')
+  return send<Handoff>(url('/api/handoff'))
 }

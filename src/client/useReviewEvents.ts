@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
 import type { ReviewEvent } from '../shared/types.js'
+import { reviewBase } from './base.js'
 
-/** Matches `EVENTS_PATH` on the server. */
-const EVENTS_PATH = '/api/events'
+/** Matches `EVENTS_SUFFIX` on the Desk. */
+const EVENTS_SUFFIX = '/api/events'
 
 /** How long to wait before reconnecting after the socket drops. */
 const RECONNECT_MS = 1000
@@ -26,7 +27,7 @@ export function useReviewEvents(onEvent: (event: ReviewEvent) => void): void {
       if (closed) return
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      socket = new WebSocket(`${protocol}//${window.location.host}${EVENTS_PATH}`)
+      socket = new WebSocket(`${protocol}//${window.location.host}${reviewBase()}${EVENTS_SUFFIX}`)
 
       socket.addEventListener('message', (message) => {
         handler.current(JSON.parse(String(message.data)) as ReviewEvent)
