@@ -2,7 +2,7 @@
 
 A local editor for reviewing AI-generated prose and markup. Open a folder of generated files, select a range of text, attach guidance for the AI agent that will revise it. The guidance is written to a JSON sidecar beside the content so any coding agent can act on it.
 
-Read `CONTEXT.md` for the domain language (Draft, Note, Anchor, Scope, Kind, Reply, Status, Review) and use those words in code, UI copy, and issues.
+Read `CONTEXT.md` for the domain language (Draft, Note, Flag, Anchor, Scope, Kind, Reply, Status, Review) and use those words in code, UI copy, and issues.
 
 ## Agent skills
 

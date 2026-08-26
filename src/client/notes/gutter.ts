@@ -1,5 +1,6 @@
 import { type Extension } from '@codemirror/state'
 import { EditorView, GutterMarker, ViewPlugin, gutter, lineNumbers } from '@codemirror/view'
+import { flagLines, flagsField } from '../flags/editor.js'
 import {
   draggedLinesField,
   hoveredLineField,
@@ -33,8 +34,36 @@ class HasNoteMarker extends GutterMarker {
   }
 }
 
+/**
+ * The standing mark on a line carrying a Flag, and the one for a line carrying
+ * both. A Flag and a Note can be about the same sentence and mean quite
+ * different things, so neither hides the other: the column shows both rather
+ * than picking a winner.
+ */
+class HasFlagMarker extends GutterMarker {
+  constructor(private readonly alsoNoted: boolean) {
+    super()
+  }
+
+  override eq(other: HasFlagMarker): boolean {
+    return other.alsoNoted === this.alsoNoted
+  }
+
+  override toDOM(): Node {
+    const mark = document.createElement('span')
+    mark.className = this.alsoNoted ? 'cm-hasFlag cm-hasFlag--noted' : 'cm-hasFlag'
+    mark.textContent = '\u2691'
+    mark.title = this.alsoNoted
+      ? 'Flagged to come back to, and carrying a Note'
+      : 'Flagged to come back to'
+    return mark
+  }
+}
+
 const addNoteMarker = new AddNoteMarker()
 const hasNoteMarker = new HasNoteMarker()
+const hasFlagMarker = new HasFlagMarker(false)
+const hasFlagAndNoteMarker = new HasFlagMarker(true)
 
 function draggedSpan(drag: { anchor: number; head: number }): { start: number; end: number } {
   return { start: Math.min(drag.anchor, drag.head), end: Math.max(drag.anchor, drag.head) }
@@ -91,19 +120,20 @@ export function noteGutter(handlers: NoteHandlers): Extension {
         }
 
         const lineAt = (offset: number) => state.doc.lineAt(offset).number
-        const covered = state
-          .field(notesField)
-          .some((note) => {
-            const span = noteLines(note, lineAt)
-            return span !== undefined && line >= span.start && line <= span.end
-          })
+        const within = (span: { start: number; end: number } | undefined) =>
+          span !== undefined && line >= span.start && line <= span.end
 
-        return covered ? hasNoteMarker : null
+        const noted = state.field(notesField).some((note) => within(noteLines(note, lineAt)))
+        const flagged = state.field(flagsField).some((flag) => within(flagLines(flag, lineAt)))
+
+        if (flagged) return noted ? hasFlagAndNoteMarker : hasFlagMarker
+        return noted ? hasNoteMarker : null
       },
       lineMarkerChange: (update) =>
         update.startState.field(hoveredLineField) !== update.state.field(hoveredLineField) ||
         update.startState.field(draggedLinesField) !== update.state.field(draggedLinesField) ||
-        update.startState.field(notesField) !== update.state.field(notesField),
+        update.startState.field(notesField) !== update.state.field(notesField) ||
+        update.startState.field(flagsField) !== update.state.field(flagsField),
       initialSpacer: () => addNoteMarker,
       domEventHandlers: gutterPointerHandlers,
     }),

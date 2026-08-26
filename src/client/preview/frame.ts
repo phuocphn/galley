@@ -68,6 +68,13 @@ export interface SelectedIn {
  */
 export interface PreviewSelect {
   kind: 'select'
+  /**
+   * What the reviewer meant by choosing this text. A drag asks for a Note; the
+   * word a double-click selected asks only to be found in the Source — see
+   * `docs/adr/0011`. The range is equally precise either way, which is the
+   * whole reason a jump can be expressed as a selection at all.
+   */
+  gesture: 'click' | 'select'
   start: SelectedIn
   end: SelectedIn
 }
@@ -116,7 +123,7 @@ export type PreviewGesture = PreviewClick | PreviewSelect | PreviewText
  * not depend on whether the Draft's Preview happened to stamp its blocks.
  */
 export function asksForANote(gesture: PreviewGesture): boolean {
-  return gesture.kind === 'select' || (gesture.kind === 'text' && gesture.gesture === 'select')
+  return gesture.kind !== 'click' && gesture.gesture === 'select'
 }
 
 /** Everything the Preview frame can say. */
@@ -160,10 +167,10 @@ export function asPreviewMessage(data: unknown): PreviewMessage | null {
     return { kind: 'click', block: message.block as number }
   }
 
-  if (message.kind === 'select') {
+  if (message.kind === 'select' && (message.gesture === 'click' || message.gesture === 'select')) {
     const start = asSelectedIn(message.start)
     const end = asSelectedIn(message.end)
-    return start && end ? { kind: 'select', start, end } : null
+    return start && end ? { kind: 'select', gesture: message.gesture, start, end } : null
   }
 
   if (message.kind === 'text' && (message.gesture === 'click' || message.gesture === 'select')) {
@@ -229,15 +236,21 @@ export function showBlockMessage(block: number): unknown {
  * as plain ES5-ish script because it is never compiled — it is a string in the
  * document the frame is handed.
  *
- * Two gestures, deliberately meaning different things. A click is *take me to
- * this in the Source*, and every click is swallowed: a link in a Draft is a
- * passage like any other, not a page to navigate to. A selection is *I want to
- * write a Note about this*, and offers the same floating **Add note** button
- * the Source view does, under the same rules — nothing on a collapsed or
- * whitespace-only selection, and nothing while a composer is already open.
+ * Two gestures, deliberately meaning different things. A **double-click** is
+ * *take me to this in the Source*; a single click does nothing at all, so the
+ * Preview stays a surface you can read in — see `docs/adr/0011`. Every click is
+ * still swallowed either way: a link in a Draft is a passage like any other,
+ * not a page to navigate to. A **selection** is *I want to write a Note about
+ * this*, and offers the floating **Add note** button the Source view does,
+ * under the same rules — nothing on a collapsed or whitespace-only selection,
+ * and nothing while a composer is already open.
  *
- * A drag that selects text ends in a click event too, so a click only counts as
- * a click when it left nothing selected.
+ * A double-click makes a selection of its own: the browser selects the word
+ * under the cursor. On a stamped page that word is kept and becomes the jump
+ * target, mapped exactly by block and offset. The **Add note** button is taken
+ * down while the message is built, both because the button's own label would
+ * otherwise be read as context and because it must not be left standing over a
+ * gesture that is about to jump away from it.
  *
  * Both gestures work on a document that stamps no blocks — an HTML Draft, whose
  * markup went through a sanitiser and a parser that keep no positions. There
@@ -399,12 +412,13 @@ export const PREVIEW_FRAME_SCRIPT = `
    * taken back off the page, because the button is in the body and its own
    * label would otherwise be read as the text following the selection.
    */
-  function selectionMessage(target) {
+  function selectionMessage(target, gesture) {
     if (!target.first || !target.last) {
-      return { kind: 'text', gesture: 'select', passage: passageOf(target.range) };
+      return { kind: 'text', gesture: gesture, passage: passageOf(target.range) };
     }
     return {
       kind: 'select',
+      gesture: gesture,
       start: selectedIn(target.range, target.first),
       end: selectedIn(target.range, target.last)
     };
@@ -449,7 +463,7 @@ export const PREVIEW_FRAME_SCRIPT = `
       var target = selected();
       if (!target) return;
       hideAddNote();
-      send(selectionMessage(target));
+      send(selectionMessage(target, 'select'));
     });
     return node;
   }
@@ -512,26 +526,50 @@ export const PREVIEW_FRAME_SCRIPT = `
 
   document.addEventListener('selectionchange', showAddNote);
 
+  // A single click reports nothing. It is still swallowed, so a link in a Draft
+  // stays a passage rather than a page to navigate to.
   document.addEventListener('click', function (event) {
-    event.preventDefault();
     if (addNote && addNote.contains(event.target)) return;
+    event.preventDefault();
+  });
 
-    // A drag that selected a phrase ends in a click event as well. That gesture
-    // is a selection, and answering it as a click would jump away from the
-    // words the reviewer had just chosen.
-    var selection = document.getSelection();
-    if (selection && !selection.isCollapsed) return;
+  /**
+   * Take me to this in the Source.
+   *
+   * The word the browser has just selected is the target where it can be mapped
+   * exactly — a stamped page knows every block's offsets in the Source, so a
+   * word costs no search. An unstamped page has none, and finding a single word
+   * across a whole document is the weakest thing the matcher can be asked to do
+   * (\`docs/adr/0005\`), so there the containing passage is sent instead: the same
+   * key a click used to send, and a far better one.
+   */
+  document.addEventListener('dblclick', function (event) {
+    if (addNote && addNote.contains(event.target)) return;
+    event.preventDefault();
+
+    // Off the page before any message is built: \`contextAround\` walks the body,
+    // and the button is in it.
+    hideAddNote();
 
     if (stamps) {
-      var block = blockAt(event.target);
-      if (!block) return;
-      send({ kind: 'click', block: block.index });
-      return;
+      var target = selected();
+      if (target) send(selectionMessage(target, 'click'));
+      else {
+        // No usable word — a double-click on a gap, or a composer standing
+        // open. The block underneath is still somewhere to be taken.
+        var block = blockAt(event.target);
+        if (block) send({ kind: 'click', block: block.index });
+      }
+    } else {
+      var range = passageAt(event.target);
+      if (range) send({ kind: 'text', gesture: 'click', passage: passageOf(range) });
     }
 
-    var range = passageAt(event.target);
-    if (!range) return;
-    send({ kind: 'text', gesture: 'click', passage: passageOf(range) });
+    // The app stays put and says so when it cannot find that text, and the
+    // reviewer is then left with a selection they may well want to Note. The
+    // button belongs back on the page for that case; when the jump succeeds
+    // this frame is on its way off screen and nobody sees it.
+    showAddNote();
   });
 
   window.addEventListener('message', function (event) {

@@ -50,9 +50,10 @@ current text is intentional.
 
 **Notes survive the rewrite.** A Note anchors to *text*, not a line number, storing
 enough surrounding context to be re-found after the agent has rewritten the passage.
-When the passage is genuinely gone, the Note becomes Orphaned and is pinned to the
-top of the Draft for re-attachment — never silently dropped, and never silently
-pointing at the wrong line.
+When the passage is genuinely gone, the Note becomes Orphaned and waits in the
+Draft's **Notes** tab for re-attachment, with the tab's badge turning amber so it
+cannot be missed — never silently dropped, and never silently pointing at the wrong
+line.
 
 **Several Reviews at once.** Every folder you open goes on the same Desk — one
 background process — at its own URL, so a paper and its cover letter can be open
@@ -66,6 +67,20 @@ galley ./launch-copy     # http://localhost:4317/r/launch-copy-a1b2
 galley ./whitepaper      # http://localhost:4317/r/whitepaper-9f3c
 ```
 
+**Flags, for what you are not ready to say yet.** Reading, something snags and you
+do not yet know what to write about it. Select it and press ⚑: the passage is
+marked, in one gesture, with a reason only if you want one. Flags gather into a list
+in the sidebar — your own, across the whole Review — and go nowhere near the agent.
+They live in `.feedback/flags.json`, which the sidecar's README explicitly tells the
+agent to leave alone. Clear one when you have looked again, or turn it into a real
+Note on the same passage and it leaves the list.
+
+**Source, Preview, Notes.** Each Draft has three views and nothing stacked above
+them: the text as written, the text as it reads, and every Note with nowhere in the
+text to draw itself — the ones about the whole Draft, and the Orphaned ones.
+Double-click a passage in the Preview to open it in the Source; a single click
+leaves you where you were reading.
+
 **Three Scopes.** A Note can reach a passage, a whole Draft, or the whole Review —
 the folder you opened. Feedback that applies to everything doesn't have to be pasted
 onto everything.
@@ -74,7 +89,7 @@ onto everything.
 the agent does with it. A Question wants an answer in a Reply and no edit at all; an
 Idea is a suggestion the agent may decline, as long as it says why.
 
-**A plain JSON sidecar is the whole contract.** Everything lands in
+**A plain JSON sidecar is the whole contract.** Every Note lands in
 `.feedback/notes.json`, documented by a `README.md` generated beside it. Any agent
 that can read a file can act on it — nothing is coupled to a particular CLI. Commit
 the folder and the Note → Reply → Resolve trail lives in git next to the prose,
@@ -123,7 +138,7 @@ is wrong about its own domain. Once an issue exists and the shape of the fix is
 agreed, a pull request is very welcome.
 
 Read [`CONTEXT.md`](./CONTEXT.md) first. It defines the words this project uses —
-Draft, Note, Anchor, Scope, Kind, Reply, Status, Review — and which words to avoid.
+Draft, Note, Flag, Anchor, Scope, Kind, Reply, Status, Review — and which words to avoid.
 Code, UI copy, and issues all use them, and a patch that calls a Note a "comment"
 costs more to unpick than it saves. The decisions behind the design, and the options
 that lost, are in [`docs/adr/`](./docs/adr).

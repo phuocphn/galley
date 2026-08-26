@@ -18,8 +18,13 @@ interface OrphanedNotesProps {
  *
  * An orphan usually means the agent *did* act on the Note and wrote the passage
  * away — so this needs one glance and one click. What it must never do is
- * vanish, or quietly point at the wrong sentence, so each one is shown at the
- * top of the Draft quoting the text it used to be about.
+ * vanish, or quietly point at the wrong sentence, so each one is shown quoting
+ * the text it used to be about.
+ *
+ * These used to be stacked above the Draft, where a Draft with twenty orphans
+ * cost most of the pane. They are in the Draft's Notes tab now, and what
+ * replaces the ambush is that tab's badge, which carries the orphan count and
+ * turns amber while there is one. See `docs/adr/0012`.
  */
 export function OrphanedNotes({
   notes,

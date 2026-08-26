@@ -1,13 +1,15 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { Note, Sidecar } from '../shared/types.js'
+import type { Flag, FlagSidecar, Note, Sidecar } from '../shared/types.js'
 import { withKind } from './kind.js'
 
 export const SIDECAR_DIRECTORY = '.feedback'
 export const NOTES_FILE = 'notes.json'
+export const FLAGS_FILE = 'flags.json'
 export const README_FILE = 'README.md'
 
 const EMPTY: Sidecar = { version: 1, notes: [] }
+const EMPTY_FLAGS: FlagSidecar = { version: 1, flags: [] }
 
 export function sidecarPath(reviewRoot: string, file: string): string {
   return path.join(reviewRoot, SIDECAR_DIRECTORY, file)
@@ -53,6 +55,46 @@ export async function mutateNotes(
   return notes
 }
 
+/**
+ * Every Flag in the Review. An absent or unreadable file reads as empty.
+ *
+ * Flags live beside the Notes but outside the agent's contract — see
+ * `docs/adr/0010`. Nothing here normalises them the way `readNotes` defaults a
+ * missing Kind: a Flag has no field an agent could leave off, because no agent
+ * writes this file.
+ */
+export async function readFlags(reviewRoot: string): Promise<Flag[]> {
+  try {
+    const raw = await readFile(sidecarPath(reviewRoot, FLAGS_FILE), 'utf8')
+    const parsed = JSON.parse(raw) as Partial<FlagSidecar>
+    return Array.isArray(parsed.flags) ? parsed.flags : []
+  } catch {
+    return EMPTY_FLAGS.flags
+  }
+}
+
+/**
+ * Apply a change to the Review's Flags.
+ *
+ * Read-modify-write like `mutateNotes`, though for a duller reason: nothing
+ * else writes this file, so the re-read is about two galley windows on the same
+ * Review rather than about an agent working underneath us.
+ */
+export async function mutateFlags(
+  reviewRoot: string,
+  change: (flags: Flag[]) => Flag[],
+): Promise<Flag[]> {
+  const flags = change(await readFlags(reviewRoot))
+
+  await mkdir(path.join(reviewRoot, SIDECAR_DIRECTORY), { recursive: true })
+  await writeSidecarReadme(reviewRoot)
+
+  const sidecar: FlagSidecar = { version: 1, flags }
+  await writeFile(sidecarPath(reviewRoot, FLAGS_FILE), `${JSON.stringify(sidecar, null, 2)}\n`, 'utf8')
+
+  return flags
+}
+
 const SIDECAR_README = `# Feedback for this folder
 
 This folder holds review feedback on the generated content beside it. It is
@@ -62,7 +104,13 @@ and is meant to be read and acted on by a coding agent.
 ## What's here
 
 - \`notes.json\` — every **Note** a reviewer has left: on a passage of a
-  **Draft**, on a whole Draft, or on this folder as a whole.
+  **Draft**, on a whole Draft, or on this folder as a whole. **This is the file
+  you act on.**
+- \`flags.json\` — the reviewer's own **Flags**: passages they marked to come
+  back to themselves. **Not for you.** Do not read it, do not act on it, and do
+  not write to it. A Flag is not feedback and asks you for nothing; if the
+  reviewer decides one needs your attention, they turn it into a Note and it
+  appears in \`notes.json\` like any other.
 
 ## How far a Note reaches
 
@@ -136,6 +184,8 @@ A Note whose \`kind\` is \`question\` wants an answer in a Reply, not an edit.
 Reply to it and set it to \`"answered"\` without touching the Draft.
 
 ## Rules for writing this file
+
+Write only \`notes.json\`. Leave \`flags.json\` exactly as you found it.
 
 Never rewrite \`notes.json\` wholesale. Read it, change the entries you mean to
 change, and write it back — the reviewer may be adding Notes at the same moment,

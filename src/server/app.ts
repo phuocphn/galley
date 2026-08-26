@@ -7,8 +7,11 @@ import type {
   Anchor,
   DraftContents,
   DraftWritten,
+  Flag,
   Handoff,
+  LocatedFlag,
   LocatedNote,
+  NewFlag,
   NewNote,
   Note,
   Reanchor,
@@ -20,7 +23,7 @@ import { handoffInstruction } from './handoff.js'
 import { asNoteKind, DEFAULT_NOTE_KIND } from './kind.js'
 import { LocatedAnchors } from './located.js'
 import { listDrafts, readDraft, writeDraft } from './review.js'
-import { mutateNotes, readNotes } from './sidecar.js'
+import { mutateFlags, mutateNotes, readFlags, readNotes } from './sidecar.js'
 import { normalised, statusOf } from './status.js'
 
 /** Attach each Note to the Draft as it stands right now. */
@@ -40,6 +43,31 @@ function locateNotes(
     return {
       ...normalised(note),
       anchor: { ...note.anchor, orphaned: located === undefined },
+      range: located ? { from: located.from, to: located.to } : null,
+      match: located?.match ?? 'orphaned',
+    }
+  })
+}
+
+/**
+ * Attach each Flag to the Draft as it stands right now.
+ *
+ * The same memo as the Notes, keyed by Anchor text, so a Flag on a passage that
+ * already carries a Note costs nothing to place. Nothing is written back the
+ * way `recordOrphans` writes for Notes: that write exists to keep the file
+ * honest for the agent reading it, and no agent reads this one.
+ */
+function locateFlags(
+  flags: Flag[],
+  draftPath: string,
+  content: string,
+  anchors: LocatedAnchors,
+): LocatedFlag[] {
+  return flags.map((flag) => {
+    const located = anchors.locate(draftPath, content, flag.anchor)
+    return {
+      ...flag,
+      anchor: { ...flag.anchor, orphaned: located === undefined },
       range: located ? { from: located.from, to: located.to } : null,
       match: located?.match ?? 'orphaned',
     }
@@ -114,7 +142,11 @@ export function createReviewApp(reviewRoot: string): Hono {
   const anchors = new LocatedAnchors()
 
   app.get('/api/review', async (c) => {
-    const [drafts, notes] = await Promise.all([listDrafts(root), readNotes(root)])
+    const [drafts, notes, flags] = await Promise.all([
+      listDrafts(root),
+      readNotes(root),
+      readFlags(root),
+    ])
 
     const listing: ReviewListing = {
       root,
@@ -130,6 +162,9 @@ export function createReviewApp(reviewRoot: string): Hono {
       // Review-Scope Notes are on no Draft, so no Draft's count can carry them.
       // They travel with the listing and are counted in the sidebar instead.
       reviewNotes: notes.filter((note) => scopeOf(note) === 'review').map(normalised),
+      // Stored, not located. Locating these would mean reading every Draft in
+      // the folder on a request that today reads none — see `docs/adr/0010`.
+      flags,
     }
     return c.json(listing)
   })
@@ -148,7 +183,16 @@ export function createReviewApp(reviewRoot: string): Hono {
     const located = locateNotes(notes, draftPath, draft.content, anchors)
     await recordOrphans(root, notes, located)
 
-    const contents: DraftContents = { path: draftPath, ...draft, notes: located }
+    // This is the one place a Flag knows where it points: the file is already
+    // read and the memo already warm, so locating them here is close to free.
+    const flags = (await readFlags(root)).filter((flag) => flag.draftPath === draftPath)
+
+    const contents: DraftContents = {
+      path: draftPath,
+      ...draft,
+      notes: located,
+      flags: locateFlags(flags, draftPath, draft.content, anchors),
+    }
     return c.json(contents)
   })
 
@@ -361,6 +405,106 @@ export function createReviewApp(reviewRoot: string): Hono {
     )
 
     if (!found) return c.json({ error: `No such Note: ${id}` }, 404)
+    return c.body(null, 204)
+  })
+
+  /**
+   * Raise a Flag.
+   *
+   * A Flag is always about a passage, so unlike a Note there is nothing to
+   * leave out and no Scope to infer: the Draft and the range are both required.
+   * The reason is not — flagging is one gesture, and the words come later or
+   * not at all (`docs/adr/0010`).
+   */
+  app.post('/api/flags', async (c) => {
+    const submitted = (await c.req.json().catch(() => undefined)) as Partial<NewFlag> | undefined
+    if (!submitted) return c.json({ error: 'Expected a JSON body' }, 400)
+
+    const { draftPath, from, to, reason } = submitted
+    if (typeof draftPath !== 'string' || draftPath === '') {
+      return c.json({ error: 'A Flag needs the Draft its passage is in' }, 400)
+    }
+    if (typeof from !== 'number' || typeof to !== 'number') {
+      return c.json({ error: 'A Flag needs both from and to' }, 400)
+    }
+    if (reason !== undefined && typeof reason !== 'string') {
+      return c.json({ error: 'A reason has to be text, or left out entirely' }, 400)
+    }
+
+    const draft = await readDraft(root, draftPath)
+    if (!draft) return c.json({ error: `No such Draft in this Review: ${draftPath}` }, 404)
+    if (from < 0 || to > draft.content.length || from >= to) {
+      return c.json({ error: 'That range is not in the Draft' }, 400)
+    }
+
+    const trimmed = reason?.trim()
+    const flag: Flag = {
+      id: randomUUID(),
+      draftPath,
+      anchor: captureAnchor(draft.content, from, to),
+      // An empty reason is the same as none: the list falls back to the
+      // anchored text, and a blank string would just render as a blank label.
+      ...(trimmed ? { reason: trimmed } : {}),
+      createdAt: new Date().toISOString(),
+    }
+
+    await mutateFlags(root, (flags) => [...flags, flag])
+    return c.json(flag, 201)
+  })
+
+  /**
+   * Write down why a Flag was raised, or change what was written.
+   *
+   * There is no `updatedAt`: a Flag is not part of a conversation with anybody,
+   * so nothing downstream needs to tell that it moved.
+   */
+  app.patch('/api/flags/:id', async (c) => {
+    const id = c.req.param('id')
+    const submitted = (await c.req.json().catch(() => undefined)) as
+      | { reason?: unknown }
+      | undefined
+
+    if (typeof submitted?.reason !== 'string') {
+      return c.json({ error: 'A Flag is changed by giving it a reason' }, 400)
+    }
+    const reason = submitted.reason.trim()
+
+    let updated: Flag | undefined
+    await mutateFlags(root, (flags) =>
+      flags.map((flag) => {
+        if (flag.id !== id) return flag
+        // Clearing the text removes the field rather than storing an empty
+        // one, so the list goes back to showing the anchored text.
+        const { reason: _previous, ...rest } = flag
+        updated = reason === '' ? rest : { ...rest, reason }
+        return updated
+      }),
+    )
+
+    if (!updated) return c.json({ error: `No such Flag: ${id}` }, 404)
+    return c.json(updated)
+  })
+
+  /**
+   * Clear a Flag.
+   *
+   * Clearing deletes it. There is no Resolved state and no history to keep: a
+   * Flag has no Replies and no agent waiting on it, so a finished one is
+   * nothing but noise in a list whose whole job is to be the outstanding work.
+   */
+  app.delete('/api/flags/:id', async (c) => {
+    const id = c.req.param('id')
+
+    let found = false
+    await mutateFlags(root, (flags) =>
+      flags.filter((flag) => {
+        if (flag.id !== id) return true
+        found = true
+        return false
+      }),
+    )
+
+    if (!found) return c.json({ error: `No such Flag: ${id}` }, 404)
     return c.body(null, 204)
   })
 

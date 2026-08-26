@@ -94,7 +94,7 @@ describe('writing a Draft back', () => {
 
     // The read is what carries the Notes, and it agrees about the text.
     const read = await fixture.getJson<DraftContents>(draftUrl('findings.md'))
-    expect(read).toEqual({ ...saved, notes: [] })
+    expect(read).toEqual({ ...saved, notes: [], flags: [] })
   })
 
   it('writes a Draft in a nested folder, and one whose name needs escaping', async () => {

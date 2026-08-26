@@ -14,7 +14,15 @@ import { closeComposer, setEditing, toggleCollapsed } from './state.js'
 /** What a thread or composer can ask the app to do. */
 export interface NoteHandlers {
   /** The range the Note attaches to, plus the Kind the composer settled on. */
-  create(range: { from: number; to: number }, note: { body: string; kind: NoteKind }): Promise<void>
+  create(
+    range: { from: number; to: number },
+    note: {
+      body: string
+      kind: NoteKind
+      /** The Flag this Note came from, which saving it clears. */
+      fromFlag?: string
+    },
+  ): Promise<void>
   /** New text, a new Kind, or both. A bare string is the new text. */
   update(id: string, change: NoteChange): Promise<void>
   remove(id: string): Promise<void>
@@ -22,6 +30,12 @@ export interface NoteHandlers {
   resolve(id: string): Promise<void>
   /** Point an Orphaned Note at new text. */
   reattach(id: string, range: { from: number; to: number }): Promise<void>
+  /**
+   * Raise a Flag on a range. Not a Note, and deliberately not routed through
+   * the composer: flagging is one gesture, and the words come later or not at
+   * all (`docs/adr/0010`).
+   */
+  flag(range: { from: number; to: number }): Promise<void>
 }
 
 const STATUS_LABELS: Record<NoteStatus, string> = {
@@ -190,12 +204,21 @@ export class ComposerWidget extends WidgetType {
     private readonly from: number,
     private readonly to: number,
     private readonly handlers: NoteHandlers,
+    /** Text the composer starts with — a Flag's reason, being promoted. */
+    private readonly initialBody = '',
+    /** The Flag being promoted, cleared once the Note is written. */
+    private readonly fromFlag?: string,
   ) {
     super()
   }
 
   override eq(other: ComposerWidget): boolean {
-    return other.from === this.from && other.to === this.to
+    return (
+      other.from === this.from &&
+      other.to === this.to &&
+      other.initialBody === this.initialBody &&
+      other.fromFlag === this.fromFlag
+    )
   }
 
   override toDOM(view: EditorView): HTMLElement {
@@ -203,14 +226,14 @@ export class ComposerWidget extends WidgetType {
     const kind = kindChooser('fix')
 
     const body = editor({
-      initialValue: '',
+      initialValue: this.initialBody,
       placeholder: 'What should the agent do here?',
       confirmLabel: 'Leave Note',
       lead: kind.node,
       onConfirm: (text) =>
         this.handlers.create(
           { from: this.from, to: this.to },
-          { body: text, kind: kind.chosen() },
+          { body: text, kind: kind.chosen(), fromFlag: this.fromFlag },
         ),
       onCancel: close,
     })
@@ -221,7 +244,13 @@ export class ComposerWidget extends WidgetType {
       element(
         'div',
         'cm-noteHeader',
-        element('span', 'cm-noteHeaderLabel', `New Note on ${lineRange(view, this.from, this.to)}`),
+        element(
+          'span',
+          'cm-noteHeaderLabel',
+          this.fromFlag
+            ? `New Note from a Flag, on ${lineRange(view, this.from, this.to)}`
+            : `New Note on ${lineRange(view, this.from, this.to)}`,
+        ),
       ),
       body,
     )
