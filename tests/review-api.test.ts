@@ -93,7 +93,13 @@ describe('reading a Draft', () => {
 
     const draft = await fixture.getJson<DraftContents>(draftUrl('guides/setup.md'))
 
-    expect(draft).toEqual({ path: 'guides/setup.md', extension: '.md', content, notes: [] })
+    expect(draft).toEqual({
+      path: 'guides/setup.md',
+      extension: '.md',
+      content,
+      notes: [],
+      flags: [],
+    })
   })
 
   it('handles a Draft whose name needs escaping in a URL', async () => {

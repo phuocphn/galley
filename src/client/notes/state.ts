@@ -28,8 +28,22 @@ function mapRange(
 /** Replace the Notes the pane is showing. Dispatched whenever they're refetched. */
 export const setNotes = StateEffect.define<LocatedNote[]>()
 
+/**
+ * What the composer is open over, and what it already knows.
+ *
+ * `body` is prefilled text — a Flag being turned into a Note brings its reason
+ * with it. `fromFlag` is that Flag: saving the Note clears it, so the passage
+ * ends up in exactly one list. See `docs/adr/0010`.
+ */
+export interface Composing {
+  from: number
+  to: number
+  body?: string
+  fromFlag?: string
+}
+
 /** Open the composer over a range of the Draft. */
-export const openComposer = StateEffect.define<{ from: number; to: number }>()
+export const openComposer = StateEffect.define<Composing>()
 
 /** Close the composer without saving. */
 export const closeComposer = StateEffect.define<null>()
@@ -66,7 +80,7 @@ export const notesField = StateField.define<LocatedNote[]>({
   },
 })
 
-export const composerField = StateField.define<{ from: number; to: number } | null>({
+export const composerField = StateField.define<Composing | null>({
   create: () => null,
   update(composer, transaction) {
     for (const effect of transaction.effects) {
@@ -76,7 +90,7 @@ export const composerField = StateField.define<{ from: number; to: number } | nu
     // An open composer is an Anchor that hasn't been saved yet, and it has to
     // follow the text for the same reason a saved one does.
     if (!composer || !transaction.docChanged) return composer
-    return mapRange(composer, transaction.changes)
+    return { ...composer, ...mapRange(composer, transaction.changes) }
   },
 })
 

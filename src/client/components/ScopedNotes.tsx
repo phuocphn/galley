@@ -21,8 +21,8 @@ interface ScopedNotesProps {
  *
  * A range Note draws itself next to the text it is about, which is what makes
  * it obviously about that text. These have no text to sit beside, so they are
- * given a place of their own instead of being pinned to an arbitrary line: at
- * the top of the Draft, or under the Draft list in the sidebar. Everything else
+ * given a place of their own instead of being pinned to an arbitrary line: the
+ * Draft's own Notes tab, or under the Draft list in the sidebar. Everything else
  * about them — Reply, Answered, Resolve — is the same as any other Note, so it
  * looks the same here as it does in the pane.
  */
@@ -92,8 +92,12 @@ export function ScopedNotes({
         )
       )}
 
+      {/* Neither list caps its own height any more. The Review's is in a sidebar
+          section that scrolls itself, and the Draft's has a whole tab to fill —
+          the cap was there for when this was squeezed in above the Draft. See
+          `docs/adr/0012`. */}
       {shown.length > 0 && (
-        <ul className={onReview ? 'mt-2' : 'mt-2 max-h-64 overflow-y-auto'}>
+        <ul className="mt-2">
           {shown.map((note) => (
             <ScopedNote
               key={note.id}

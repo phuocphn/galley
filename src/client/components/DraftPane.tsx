@@ -6,9 +6,18 @@ import { stex } from '@codemirror/legacy-modes/mode/stex'
 import { EditorSelection, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { DraftContents, DraftExtension, LocatedNote } from '../../shared/types.js'
+import type {
+  DraftContents,
+  DraftExtension,
+  LocatedFlag,
+  LocatedNote,
+  Note,
+  NoteKind,
+} from '../../shared/types.js'
 import {
   addReply,
+  clearFlag,
+  createFlag,
   createNote,
   deleteNote,
   reanchorNote,
@@ -16,6 +25,8 @@ import {
   saveDraft,
   updateNote,
 } from '../api.js'
+import { useDraftView } from '../draft-view.js'
+import { flagsField, keepingLocalFlagRanges, setFlags } from '../flags/editor.js'
 import {
   keepingLocalAnchors,
   notes,
@@ -34,8 +45,9 @@ import {
   offsetOfBlock,
   type PreviewLocation,
 } from '../preview/mapping.js'
-import { usePreviewMode } from '../preview/mode.js'
 import { DraftPreview, type PreviewArrival } from './DraftPreview.js'
+import { OrphanedNotes, type OrphanedNote } from './OrphanedNotes.js'
+import { ScopedNotes } from './ScopedNotes.js'
 
 /**
  * How long the reviewer has to stop typing before the Draft is written.
@@ -47,7 +59,8 @@ import { DraftPreview, type PreviewArrival } from './DraftPreview.js'
 const AUTOSAVE_IDLE_MS = 500
 
 /** What the toggle bar says while the reviewer is reading the Preview. */
-const PREVIEW_HINT = 'Click a passage to open it in the Source. Select one to leave a Note on it.'
+const PREVIEW_HINT =
+  'Double-click a passage to open it in the Source. Select one to leave a Note on it.'
 
 /**
  * What the bar says when a gesture could not be pinned to the words it was
@@ -78,6 +91,8 @@ function locatedBy(kind: PreviewKind, source: string, gesture: PreviewGesture): 
   }
 
   if (gesture.kind === 'click') return locateBlock(source, gesture.block)
+  // A precise range, whichever it is asking for: a drag wants a Note on it, the
+  // word a double-click selected wants only to be found (`docs/adr/0011`).
   if (gesture.kind === 'select') return locatePhrase(source, gesture)
   return { outcome: 'not-found' }
 }
@@ -108,19 +123,55 @@ function languageFor(extension: DraftExtension): Extension[] {
 interface Conflict {
   content: string
   notes: LocatedNote[]
+  flags: LocatedFlag[]
 }
 
 interface DraftPaneProps {
   draft: DraftContents
+  /**
+   * The Notes about this whole Draft. They have no Anchor, so the pane has
+   * nowhere in the text to draw them; they live in the Notes tab instead.
+   */
+  draftScopeNotes: Note[]
   /** The Orphaned Note the reviewer is pointing at new text, if any. */
   reattaching: string | undefined
-  /** Called after a Note is added, edited, or removed. */
+  /**
+   * A Flag the reviewer asked to be taken to from the sidebar. Answered once
+   * this Draft is the one holding it, which is what makes the same click work
+   * across Drafts: selecting the Draft and landing on the passage are one
+   * request, arriving one render apart.
+   */
+  goToFlag: string | undefined
+  onWentToFlag: () => void
+  /**
+   * A Flag the reviewer asked to turn into a Note. Answered by opening the
+   * composer over its passage, prefilled with its reason — the words become the
+   * Note, and the Flag is cleared when the Note is saved.
+   */
+  promotingFlag: string | undefined
+  onPromotedFlag: () => void
+  /** Called after a Note or a Flag is added, edited, or removed. */
   onNotesChanged: () => Promise<void>
+  /** Start pointing an Orphaned Note at new text. */
+  onReattach: (id: string) => void
+  onCancelReattach: () => void
   /** Called once an Orphaned Note has been given a new Anchor. */
   onReattached: () => void
 }
 
-export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: DraftPaneProps) {
+export function DraftPane({
+  draft,
+  draftScopeNotes,
+  reattaching,
+  goToFlag,
+  onWentToFlag,
+  promotingFlag,
+  onPromotedFlag,
+  onNotesChanged,
+  onReattach,
+  onCancelReattach,
+  onReattached,
+}: DraftPaneProps) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView>(null)
   /**
@@ -173,12 +224,20 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   const conflicted = useRef(false)
   conflicted.current = conflict !== undefined
 
-  const [previewing, setPreviewing] = usePreviewMode()
+  const [view_, setView] = useDraftView()
   const previewKind = previewKindFor(draft.extension)
-  // The flag outlives any one Draft, so a Draft with no preview — `.txt`,
+  // The choice outlives any one Draft, so a Draft with no preview — `.txt`,
   // `.tex`, `.bib` — simply shows its source while the reviewer is in preview
   // mode, and rendering resumes on the next Draft that has one.
-  const showingPreview = previewing && previewKind !== null
+  const showingPreview = view_ === 'preview' && previewKind !== null
+  /**
+   * The Notes tab: every Note on this Draft with nowhere in the text to draw
+   * itself. Unlike the Preview it is offered for every Draft, because every
+   * Draft can carry one — see `docs/adr/0012`.
+   */
+  const showingNotes = view_ === 'notes'
+  /** Whichever view it is, the editor is behind it rather than gone. */
+  const showingSource = !showingPreview && !showingNotes
   /**
    * Whether the two views can be kept on the same passage at all. Only Markdown
    * stamps its rendered blocks with where they came from, so only Markdown can
@@ -248,6 +307,48 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   // through a ref rather than closing over the render that created it.
   const latest = useRef({ draftPath: draft.path, onNotesChanged, onReattached })
   latest.current = { draftPath: draft.path, onNotesChanged, onReattached }
+
+  /**
+   * Turn a Flag into a Note: the composer opens over its passage with its
+   * reason already in it, so the Kind is still the reviewer's to choose and the
+   * words are still theirs to change. Nothing is written until they say so.
+   */
+  useEffect(() => {
+    if (!promotingFlag) return
+    const editor = view.current
+    if (!editor) return
+
+    const target = draft.flags.find((flag) => flag.id === promotingFlag)
+    if (!target) return
+
+    onPromotedFlag()
+    // An Orphaned Flag has no passage to leave a Note on. The list says so and
+    // offers to clear it instead; nothing is opened here.
+    if (!target.range) return
+
+    setView('source')
+    const from = Math.min(target.range.from, editor.state.doc.length)
+    const to = Math.min(target.range.to, editor.state.doc.length)
+    editor.dispatch({
+      effects: [
+        EditorView.scrollIntoView(EditorSelection.range(from, to), { y: 'center' }),
+        openComposer.of({ from, to, body: target.reason ?? '', fromFlag: target.id }),
+      ],
+    })
+  }, [promotingFlag, draft.flags, onPromotedFlag, setView])
+
+  /**
+   * A Note about this whole Draft. It has no Anchor to cut, so unlike a range
+   * Note it needs no flush and is unaffected by a conflict — nothing about the
+   * text it is on can be wrong, because it is not on any text.
+   */
+  const scopeNote = useCallback(
+    async (body: string, kind: NoteKind): Promise<void> => {
+      await createNote({ draftPath: latest.current.draftPath, body, kind })
+      await latest.current.onNotesChanged()
+    },
+    [],
+  )
 
   const stopIdleTimer = useCallback(() => {
     if (idleTimer.current === undefined) return
@@ -354,6 +455,10 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
           body: note.body,
           kind: note.kind,
         })
+        // A promoted Flag is cleared only once its Note exists, and never the
+        // other way round: a stray Flag is recoverable, a lost Note is not.
+        // See `docs/adr/0010`.
+        if (note.fromFlag) await clearFlag(note.fromFlag)
         view.current?.dispatch({ effects: closeComposer.of(null) })
         await latest.current.onNotesChanged()
       },
@@ -372,6 +477,17 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
       },
       async resolve(id) {
         await resolveNote(id)
+        await latest.current.onNotesChanged()
+      },
+      async flag(range) {
+        // The Anchor is cut from the file on disk, exactly as a Note's is, so
+        // the buffer has to be there first. A conflict is refused for the same
+        // reason too: the Anchor would come out of the agent's text.
+        if (conflicted.current) {
+          throw new Error('This Draft changed on disk. Settle that first, then flag the passage.')
+        }
+        await flush()
+        await createFlag({ draftPath: latest.current.draftPath, ...range })
         await latest.current.onNotesChanged()
       },
       async reattach(id, range) {
@@ -405,14 +521,27 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
           // Sometimes fixing the prose is faster than explaining the fix, so the
           // Draft is editable — with undo, since a hand edit is a real edit.
           history(),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
+          keymap.of([
+            // Before the defaults, so nothing else claims it first.
+            {
+              key: 'Mod-Shift-f',
+              run: (editor) => {
+                const { from, to } = editor.state.selection.main
+                if (from === to || editor.state.sliceDoc(from, to).trim() === '') return false
+                void handlers.flag({ from, to })
+                return true
+              },
+            },
+            ...defaultKeymap,
+            ...historyKeymap,
+          ]),
           autosave,
           notes(handlers),
         ],
       }),
     })
     view.current = editor
-    editor.dispatch({ effects: setNotes.of(draft.notes) })
+    editor.dispatch({ effects: [setNotes.of(draft.notes), setFlags.of(draft.flags)] })
     // A scroll offset, and a reading position, belong to the Draft they were
     // taken from. Neither view's survives a switch to another Draft.
     sourceScrollTop.current = 0
@@ -451,7 +580,7 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
       // Whatever landed on disk, it says what the buffer says. Nothing to move.
       savedContent.current = draft.content
       setConflict(undefined)
-      editor.dispatch({ effects: setNotes.of(draft.notes) })
+      editor.dispatch({ effects: [setNotes.of(draft.notes), setFlags.of(draft.flags)] })
       return
     }
 
@@ -459,7 +588,10 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
       // Our own write coming back round the watcher, with the buffer already
       // typed on since. Leaving the buffer alone is the whole point.
       editor.dispatch({
-        effects: setNotes.of(keepingLocalAnchors(draft.notes, editor.state.field(notesField))),
+        effects: [
+          setNotes.of(keepingLocalAnchors(draft.notes, editor.state.field(notesField))),
+          setFlags.of(keepingLocalFlagRanges(draft.flags, editor.state.field(flagsField))),
+        ],
       })
       return
     }
@@ -472,7 +604,7 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
       setConflict(undefined)
       editor.dispatch({
         changes: { from: 0, to: editor.state.doc.length, insert: draft.content },
-        effects: setNotes.of(draft.notes),
+        effects: [setNotes.of(draft.notes), setFlags.of(draft.flags)],
       })
       snapshotForPreview()
       return
@@ -480,8 +612,8 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
 
     // Both sides have written. Neither version is ours to throw away.
     stopIdleTimer()
-    setConflict({ content: draft.content, notes: draft.notes })
-  }, [draft.content, draft.notes, snapshotForPreview, stopIdleTimer])
+    setConflict({ content: draft.content, notes: draft.notes, flags: draft.flags })
+  }, [draft.content, draft.notes, draft.flags, snapshotForPreview, stopIdleTimer])
 
   const keepMine = useCallback(() => {
     const editor = view.current
@@ -498,7 +630,7 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
     savedContent.current = conflict.content
     editor.dispatch({
       changes: { from: 0, to: editor.state.doc.length, insert: conflict.content },
-      effects: setNotes.of(conflict.notes),
+      effects: [setNotes.of(conflict.notes), setFlags.of(conflict.flags)],
     })
     snapshotForPreview()
     // Dispatched while the conflict still stands, so autosave stays out of it.
@@ -512,6 +644,36 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
   useEffect(() => {
     view.current?.dispatch({ effects: setReattaching.of(reattaching ?? null) })
   }, [reattaching])
+
+  /**
+   * Take the reviewer to a Flag they picked out of the sidebar.
+   *
+   * Nothing moves until this Draft is the one carrying it and its Anchor has
+   * been found — an Orphaned Flag has nowhere to be taken to, and the list says
+   * so rather than this jumping somewhere arbitrary. The passage is selected on
+   * arrival, so the ⚑ they clicked and the words in front of them are visibly
+   * the same thing.
+   */
+  useEffect(() => {
+    if (!goToFlag) return
+    const editor = view.current
+    if (!editor) return
+
+    const target = draft.flags.find((flag) => flag.id === goToFlag)
+    if (!target) return
+
+    onWentToFlag()
+    if (!target.range) return
+
+    setView('source')
+    const from = Math.min(target.range.from, editor.state.doc.length)
+    const to = Math.min(target.range.to, editor.state.doc.length)
+    editor.dispatch({
+      selection: EditorSelection.single(from, to),
+      effects: EditorView.scrollIntoView(EditorSelection.range(from, to), { y: 'center' }),
+    })
+    editor.focus()
+  }, [goToFlag, draft.flags, onWentToFlag, setView])
 
   /**
    * The reviewer pointed at a passage in the Preview: take them to it in the
@@ -552,9 +714,9 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
       pendingJump.current = { from: located.from, to: located.to, compose }
       // Review-wide, so the next Draft opens in its Source too: "which view am
       // I in" stays one answer rather than one answer with exceptions.
-      setPreviewing(false)
+      setView('source')
     },
-    [previewKind, previewSource, setPreviewing],
+    [previewKind, previewSource, setView],
   )
 
   /**
@@ -665,26 +827,57 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
     editor.requestMeasure()
   }, [showingPreview, hasBlocks, sourceTopBlock])
 
+  /**
+   * Notes that had an Anchor and lost it. A Draft-Scope Note never had one and
+   * is already held separately, so the two cannot be confused here.
+   */
+  const orphanedNotes = draft.notes.filter(
+    (note): note is OrphanedNote => Boolean(note.anchor) && note.range === null,
+  )
+
+  // Outstanding work only: a Resolved whole-Draft Note is behind that section's
+  // own "show resolved" toggle, and should not be counted on the tab.
+  const outstandingScopeNotes = draftScopeNotes.filter((note) => note.status !== 'resolved').length
+  const notesTabBadge =
+    outstandingScopeNotes + orphanedNotes.length === 0
+      ? undefined
+      : orphanedNotes.length === 0
+        ? String(outstandingScopeNotes)
+        : `${outstandingScopeNotes}+${orphanedNotes.length}`
+
   return (
     <div className="flex h-full flex-col">
-      {/* A Draft with no preview gets no toggle. It still gets the bar while
-          preview mode is on, so the toggle looks explained rather than missing. */}
-      {(previewKind || previewing) && (
+      {/* Always shown, unlike the old Source/Preview toggle: every Draft has a
+          Notes tab even when it has no Preview. A Draft with none simply does
+          not offer that one — see `docs/adr/0012`. */}
+      {
         <div className="flex h-9 shrink-0 items-center gap-3 border-b border-[var(--review-border)] px-3">
-          {previewKind ? (
-            <div
-              role="group"
-              aria-label="Draft view"
-              className="inline-flex overflow-hidden rounded-md border border-[var(--review-border)]"
-            >
-              <ViewButton active={!showingPreview} onClick={() => setPreviewing(false)}>
-                Source
-              </ViewButton>
-              <ViewButton active={showingPreview} onClick={() => setPreviewing(true)}>
+          <div
+            role="group"
+            aria-label="Draft view"
+            className="inline-flex overflow-hidden rounded-md border border-[var(--review-border)]"
+          >
+            <ViewButton active={showingSource} onClick={() => setView('source')}>
+              Source
+            </ViewButton>
+            {previewKind && (
+              <ViewButton active={showingPreview} onClick={() => setView('preview')}>
                 Preview
               </ViewButton>
-            </div>
-          ) : (
+            )}
+            <ViewButton
+              active={showingNotes}
+              onClick={() => setView('notes')}
+              badge={notesTabBadge}
+              /* Amber when Notes have lost their text. The strip that used to
+                 ambush the reviewer with that is gone, so the badge is what
+                 replaces it — see `docs/adr/0012`. */
+              alarming={orphanedNotes.length > 0}
+            >
+              Notes
+            </ViewButton>
+          </div>
+          {!previewKind && (
             <span className="truncate text-[12px] text-[var(--review-dim)]">
               A plain text Draft has no rendered preview.
             </span>
@@ -699,7 +892,7 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
             )
           )}
         </div>
-      )}
+      }
 
       {conflict && (
         <ConflictBanner draftPath={draft.path} onKeepMine={keepMine} onTakeTheirs={takeTheirs} />
@@ -727,7 +920,7 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
         <div
           ref={host}
           className="absolute inset-0 overflow-auto"
-          style={{ visibility: showingPreview ? 'hidden' : 'visible' }}
+          style={{ visibility: showingSource ? 'visible' : 'hidden' }}
           data-testid="draft-pane"
         />
         {/* Mounted on first use and hidden thereafter, never unmounted —
@@ -750,6 +943,39 @@ export function DraftPane({ draft, reattaching, onNotesChanged, onReattached }: 
             />
           </div>
         )}
+        {/* Every Note on this Draft with nowhere in the text to draw itself:
+            the ones about the whole Draft, which never had an Anchor, and the
+            Orphaned ones, which had one and lost it. Rendered here rather than
+            above the pane so that nothing is stacked on top of the Draft, and
+            here rather than in `App` so that switching tabs does not unmount
+            the editor and throw away every open thread. See `docs/adr/0012`. */}
+        <div
+          className="absolute inset-0 overflow-y-auto bg-[var(--review-surface)]"
+          style={{ visibility: showingNotes ? 'visible' : 'hidden' }}
+        >
+          <ScopedNotes
+            scope="draft"
+            subject={draft.path}
+            notes={draftScopeNotes}
+            onCreate={(body, kind) => void scopeNote(body, kind)}
+            onReply={(id, body) => void addReply(id, body).then(onNotesChanged)}
+            onResolve={(id) => void resolveNote(id).then(onNotesChanged)}
+            onDelete={(id) => void deleteNote(id).then(onNotesChanged)}
+          />
+          <OrphanedNotes
+            notes={orphanedNotes}
+            reattaching={reattaching}
+            /* Picking the new text happens in the editor, so asking to
+               re-attach is also asking to be taken back to the Source. */
+            onReattach={(id) => {
+              onReattach(id)
+              setView('source')
+            }}
+            onCancelReattach={onCancelReattach}
+            onResolve={(id) => void resolveNote(id).then(onNotesChanged)}
+            onDelete={(id) => void deleteNote(id).then(onNotesChanged)}
+          />
+        </div>
       </div>
     </div>
   )
@@ -799,10 +1025,16 @@ function ConflictBanner({
 function ViewButton({
   active,
   onClick,
+  badge,
+  alarming,
   children,
 }: {
   active: boolean
   onClick: () => void
+  /** What is waiting behind this tab, if anything. */
+  badge?: string
+  /** Something behind this tab needs answering — an Orphaned Note. */
+  alarming?: boolean
   children: string
 }) {
   return (
@@ -810,13 +1042,27 @@ function ViewButton({
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`px-2.5 py-1 text-[12px] font-medium ${
+      className={`flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-medium ${
         active
           ? 'bg-[var(--review-accent)] text-white'
           : 'bg-[var(--review-surface)] text-[var(--review-dim)] hover:bg-[var(--review-muted)]'
       }`}
     >
       {children}
+      {badge && (
+        <span
+          className={`rounded-full px-1.5 text-[11px] font-semibold ${
+            active
+              ? 'bg-white/25 text-white'
+              : alarming
+                ? 'bg-[#fff8c5] text-[#7d4e00]'
+                : 'bg-[var(--review-muted)] text-[var(--review-dim)]'
+          }`}
+        >
+          {alarming && '\u26a0 '}
+          {badge}
+        </span>
+      )}
     </button>
   )
 }

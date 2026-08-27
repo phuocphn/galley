@@ -20,16 +20,22 @@ _Avoid_: Rendered view, reading view, output, WYSIWYG.
 One piece of guidance a reviewer attaches to a range of a Draft, addressed to the AI agent that will revise it.
 _Avoid_: Comment (means `<!-- -->` inside a Draft), feedback, annotation, remark.
 
+**Flag**:
+A passage of a Draft the reviewer marked to come back to, addressed to nobody.
+The counterpart of a Note: a Note says what to change, a Flag says only that
+this needs a second look. It never reaches the agent.
+_Avoid_: Comment, TODO, bookmark, marker, highlight.
+
 **Anchor**:
 The location a Note is attached to — a text range, recorded with enough surrounding text to be re-found after the Draft changes.
 _Avoid_: Selection, position, target, location.
 
 **Located**:
-The state of a Note whose Anchor has been found in the Draft as it stands now — either verbatim, or reworded closely enough to still be the same passage. The counterpart of Orphaned.
+The state of a Note or Flag whose Anchor has been found in the Draft as it stands now — either verbatim, or reworded closely enough to still be the same passage. The counterpart of Orphaned.
 _Avoid_: Resolved (that is a Status, and means the reviewer accepted the Note), matched, found, positioned.
 
 **Orphaned**:
-The state of a Note whose Anchor can no longer be found in the Draft, typically because the agent rewrote that passage away.
+The state of a Note or Flag whose Anchor can no longer be found in the Draft, typically because the agent rewrote that passage away.
 _Avoid_: Stale, broken, lost, detached.
 
 **Desk**:

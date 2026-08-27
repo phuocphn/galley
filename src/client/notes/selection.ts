@@ -1,5 +1,6 @@
 import { StateField, type EditorState, type Extension } from '@codemirror/state'
 import { EditorView, showTooltip, type Tooltip, type TooltipView } from '@codemirror/view'
+import { flagsField } from '../flags/editor.js'
 import { button } from './dom.js'
 import {
   composerField,
@@ -11,13 +12,19 @@ import {
 import type { NoteHandlers } from './widgets.js'
 
 /**
- * The floating **Add note** button, revealed by selecting text in a Draft.
+ * The floating **Add note** and **⚑** buttons, revealed by selecting text in a
+ * Draft.
  *
  * The gutter anchors a Note to whole lines, which is too coarse for prose: a
  * Markdown paragraph is often one 400-character line, and the Note is about
  * five words of it. This is a second way into the same composer — it opens with
  * the Anchor set to the selected character range — so the stored Anchor,
  * re-anchoring, and the rest of a Note's life are untouched.
+ *
+ * The ⚑ beside it raises a Flag on the same range and files it immediately —
+ * no composer, no dialog. It stands down while an Orphaned Note is being
+ * re-attached, where the whole control means "point that Note here" and a
+ * second thing to press would be a trap.
  */
 
 /** How far the button floats clear of the text it belongs to. */
@@ -44,6 +51,20 @@ function anchorableSelection(state: EditorState): { from: number; to: number } |
   if (alreadyNoted && !state.field(reattachingField)) return null
 
   return { from, to }
+}
+
+/**
+ * Whether this exact passage already carries a Flag.
+ *
+ * The same guard the **Add note** button has against offering to write a Note
+ * over one just written: flagging leaves the selection where it was, so without
+ * this the ⚑ would sit on the passage it has just flagged, offering to flag it
+ * again. The mark under the text says the same thing more quietly.
+ */
+function alreadyFlagged(state: EditorState, range: { from: number; to: number }): boolean {
+  return state
+    .field(flagsField)
+    .some((flag) => flag.range?.from === range.from && flag.range.to === range.to)
 }
 
 /**
@@ -86,7 +107,34 @@ function addNoteButtonView(view: EditorView, handlers: NoteHandlers): TooltipVie
   // reviewer made it, which is what the Anchor is about to be cut from.
   add.addEventListener('mousedown', (event) => event.preventDefault())
 
-  return { dom: add, offset: { x: 0, y: LIFT } }
+  const range = anchorableSelection(view.state)
+  if (reattaching || (range && alreadyFlagged(view.state, range))) {
+    return { dom: wrap(add), offset: { x: 0, y: LIFT } }
+  }
+
+  const raise = button('\u2691', 'cm-flagSelection', () => {
+    const range = anchorableSelection(view.state)
+    if (!range) return
+    void handlers.flag(range)
+  })
+  raise.title = 'Flag this passage to come back to (\u2318\u21e7F)'
+  raise.addEventListener('mousedown', (event) => event.preventDefault())
+
+  return { dom: wrap(add, raise), offset: { x: 0, y: LIFT } }
+}
+
+/**
+ * The tooltip element itself, holding one or both buttons.
+ *
+ * CodeMirror styles the tooltip node, so the buttons cannot be it any more now
+ * that there can be two: the wrapper takes the panel styling and the buttons
+ * sit inside it.
+ */
+function wrap(...buttons: HTMLElement[]): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'cm-selectionActions'
+  row.append(...buttons)
+  return row
 }
 
 function addNoteTooltip(
@@ -121,9 +169,13 @@ function addNoteTooltipField(handlers: NoteHandlers): StateField<Tooltip | null>
       const range = anchorableSelection(transaction.state)
       if (!range) return null
 
-      const startedReattaching = transaction.startState.field(reattachingField) !==
-        transaction.state.field(reattachingField)
-      if (!startedReattaching && current && current.pos === range.from && current.end === range.to) {
+      // Rebuilt when the Flags change too: the ⚑ stands down once the passage
+      // it is over has been flagged, and the tooltip is reused otherwise.
+      const changed =
+        transaction.startState.field(reattachingField) !==
+          transaction.state.field(reattachingField) ||
+        transaction.startState.field(flagsField) !== transaction.state.field(flagsField)
+      if (!changed && current && current.pos === range.from && current.end === range.to) {
         return current
       }
       return addNoteTooltip(range, create)
@@ -154,11 +206,35 @@ const addNoteButton = {
 
 const hovered = { background: '#0550ae' }
 
+/** The row is the tooltip, so it carries the panel's own reset. */
+const actionRow = {
+  display: 'flex',
+  gap: '1px',
+  border: 'none',
+  borderRadius: '6px',
+  background: 'transparent',
+  boxShadow: '0 1px 3px rgba(31, 35, 40, 0.24)',
+  overflow: 'hidden',
+}
+
+const flagButton = {
+  ...addNoteButton,
+  padding: '3px 7px',
+  borderRadius: '0',
+  fontSize: '13px',
+}
+
 const addNoteTooltipTheme = EditorView.baseTheme({
-  '&light .cm-tooltip.cm-addNoteToSelection': addNoteButton,
-  '&dark .cm-tooltip.cm-addNoteToSelection': addNoteButton,
-  '&light .cm-tooltip.cm-addNoteToSelection:hover': hovered,
-  '&dark .cm-tooltip.cm-addNoteToSelection:hover': hovered,
+  '&light .cm-tooltip.cm-selectionActions': actionRow,
+  '&dark .cm-tooltip.cm-selectionActions': actionRow,
+  '&light .cm-tooltip .cm-addNoteToSelection': { ...addNoteButton, borderRadius: '0' },
+  '&dark .cm-tooltip .cm-addNoteToSelection': { ...addNoteButton, borderRadius: '0' },
+  '&light .cm-tooltip .cm-addNoteToSelection:hover': hovered,
+  '&dark .cm-tooltip .cm-addNoteToSelection:hover': hovered,
+  '&light .cm-tooltip .cm-flagSelection': flagButton,
+  '&dark .cm-tooltip .cm-flagSelection': flagButton,
+  '&light .cm-tooltip .cm-flagSelection:hover': hovered,
+  '&dark .cm-tooltip .cm-flagSelection:hover': hovered,
 })
 
 /** Selecting text in the Draft offers to open the composer over that range. */

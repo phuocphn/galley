@@ -1,5 +1,6 @@
 import { StateField, type EditorState, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
+import { flagAnchors } from '../flags/editor.js'
 import { noteGutter } from './gutter.js'
 import { selectionNoteButton } from './selection.js'
 import {
@@ -70,7 +71,13 @@ function buildDecorations(state: EditorState, handlers: NoteHandlers): Decoratio
     widget(
       blockPositionFor(state, composer.from, composer.to),
       Decoration.widget({
-        widget: new ComposerWidget(composer.from, composer.to, handlers),
+        widget: new ComposerWidget(
+          composer.from,
+          composer.to,
+          handlers,
+          composer.body,
+          composer.fromFlag,
+        ),
         block: true,
         // Sits below any existing threads on the same line.
         side: 2,
@@ -99,9 +106,14 @@ const anchorTheme = EditorView.baseTheme({
 })
 
 /**
- * Notes in the Draft pane: the two ways of creating one — the gutter, for whole
- * lines, and a text selection, for a phrase — plus the inline threads that show
- * them beneath the text they are about.
+ * Everything the Draft pane draws over the text: the two ways of creating a
+ * Note — the gutter, for whole lines, and a text selection, for a phrase — the
+ * inline threads that show them beneath the text they are about, and the Flag
+ * marks, which have neither a thread nor a composer and only need to be seen.
+ *
+ * The Flag layer is included here rather than added beside this call because
+ * the gutter reads it: the ⚑ and the Note's dot share one column, so the field
+ * has to be there whenever the gutter is.
  */
 export function notes(handlers: NoteHandlers): Extension {
   const decorations = StateField.define<DecorationSet>({
@@ -120,6 +132,7 @@ export function notes(handlers: NoteHandlers): Extension {
     reattachingField,
     decorations,
     anchorTheme,
+    flagAnchors(),
     noteGutter(handlers),
     selectionNoteButton(handlers),
   ]

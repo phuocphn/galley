@@ -2,7 +2,7 @@ import path from 'node:path'
 import chokidar, { type FSWatcher } from 'chokidar'
 import { DRAFT_EXTENSIONS } from '../shared/types.js'
 import type { ReviewEvents } from './events.js'
-import { NOTES_FILE, SIDECAR_DIRECTORY } from './sidecar.js'
+import { FLAGS_FILE, NOTES_FILE, SIDECAR_DIRECTORY } from './sidecar.js'
 
 /** Long enough to coalesce an agent's write burst, short enough to feel live. */
 const SETTLE_MS = 80
@@ -34,7 +34,15 @@ export function watchReview(reviewRoot: string, events: ReviewEvents): FSWatcher
   const announce = (absolute: string): void => {
     const relative = path.relative(root, absolute).split(path.sep).join('/')
 
-    if (relative === `${SIDECAR_DIRECTORY}/${NOTES_FILE}`) {
+    // Flags ride the same event as Notes. It is not a perfect name, but the
+    // client answers both by reloading the Review and the open Draft, and a
+    // second event would buy a second identical code path. The one thing this
+    // announces is another galley window on the same Review — no agent writes
+    // `flags.json` (`docs/adr/0010`).
+    if (
+      relative === `${SIDECAR_DIRECTORY}/${NOTES_FILE}` ||
+      relative === `${SIDECAR_DIRECTORY}/${FLAGS_FILE}`
+    ) {
       events.emit({ type: 'notes-changed' })
       return
     }

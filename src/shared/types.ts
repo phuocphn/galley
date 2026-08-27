@@ -28,6 +28,14 @@ export interface ReviewListing {
    * the listing and are shown in the sidebar rather than inside any one Draft.
    */
   reviewNotes: Note[]
+  /**
+   * Every Flag in the Review, exactly as stored. They are deliberately *not*
+   * located here: the listing never reads a Draft's contents, and it is
+   * refetched on every Note mutation and every watcher event — see
+   * `docs/adr/0010`. The sidebar shows them by their Anchor's own text, and
+   * only the open Draft's Flags know where they point.
+   */
+  flags: Flag[]
 }
 
 /** A single Draft's contents, with its Notes located in the current text. */
@@ -36,6 +44,8 @@ export interface DraftContents {
   extension: DraftExtension
   content: string
   notes: LocatedNote[]
+  /** This Draft's Flags, located in the text as it stands. */
+  flags: LocatedFlag[]
 }
 
 /**
@@ -122,6 +132,59 @@ export interface Note {
   replies: Reply[]
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * A passage of a Draft the reviewer marked to come back to.
+ *
+ * The counterpart of a Note, and deliberately almost nothing like one: it is
+ * addressed to nobody, so it has no Kind, no Status and no Replies — every one
+ * of those exists to coordinate with an agent that is not part of this. It
+ * lives in its own sidecar file, which the agent is never pointed at, so
+ * "the agent never acts on a Flag" is true by construction rather than by a
+ * filter something has to remember to apply. See `docs/adr/0010`.
+ *
+ * A Flag is always about a passage, so unlike a Note it has no Scope to derive:
+ * the Draft path and the Anchor are both always there.
+ */
+export interface Flag {
+  id: string
+  draftPath: string
+  anchor: Anchor
+  /** Why, if the reviewer said. Flagging is one gesture; typing is optional. */
+  reason?: string
+  createdAt: string
+}
+
+/**
+ * A Flag with its Anchor located in the Draft as it stands right now.
+ *
+ * There is no `unanchored` match as there is for a Note: a Flag always had an
+ * Anchor, so `orphaned` is the only way for it to have no range.
+ */
+export interface LocatedFlag extends Flag {
+  range: { from: number; to: number } | null
+  match: 'exact' | 'reworded' | 'orphaned'
+}
+
+/** What the client sends to raise a Flag. */
+export interface NewFlag {
+  draftPath: string
+  /** Character offsets into the Draft as the client currently has it. */
+  from: number
+  to: number
+  reason?: string
+}
+
+/** What the client sends to write down why a Flag was raised, or change it. */
+export interface FlagChange {
+  reason: string
+}
+
+/** The shape of `.feedback/flags.json`. */
+export interface FlagSidecar {
+  version: 1
+  flags: Flag[]
 }
 
 /** A Note with its Anchor located in the Draft as it stands right now. */

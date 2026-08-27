@@ -1,6 +1,6 @@
 # Notes anchor to text, not line numbers
 
-The whole point of the tool is that an agent rewrites the Draft between passes, which makes line numbers worthless the moment they matter most. An Anchor therefore stores the anchored text plus a few lines of surrounding context, with line numbers kept only as a hint. Within a session CodeMirror 6 maps every Anchor through the reviewer's keystrokes automatically; on reload, Anchors are re-found by matching their stored text. A Note whose text can no longer be found becomes Orphaned and is pinned at the top of the Draft for re-attachment — never silently dropped, and never silently pointed at the wrong line.
+The whole point of the tool is that an agent rewrites the Draft between passes, which makes line numbers worthless the moment they matter most. An Anchor therefore stores the anchored text plus a few lines of surrounding context, with line numbers kept only as a hint. Within a session CodeMirror 6 maps every Anchor through the reviewer's keystrokes automatically; on reload, Anchors are re-found by matching their stored text. A Note whose text can no longer be found becomes Orphaned and is offered for re-attachment — never silently dropped, and never silently pointed at the wrong line. (Where that offer appears changed in ADR-0012: it was the top of the Draft, and is now the Draft's Notes tab.)
 
 ## Considered Options
 
